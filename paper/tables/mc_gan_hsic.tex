@@ -1,0 +1,55 @@
+\begin{table}[ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2.5pt}
+\caption{Generated instruments with the HSIC test, $\lambda=1$. All rows train on one half and test on the other. Pass: share of replications passing every test (weak instruments, Sargan and, for the HSIC rows, the HSIC test at 5\%); Rej.\ HSIC: rejection rate of the HSIC test between the W-partialled instruments and the 2SLS residual; $\rho_u$ as in Table~\ref{tab:mc-gan}.  20 replications per cell; $\beta=1$; $\lambda$ as in the text unless fixed by the scenario.}\label{tab:mc-gan-hsic}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+ & \multicolumn{4}{c}{$n=1000$} \\
+\cmidrule(lr){3-6}
+Scenario & Estimator & Bias & Pass & Rej.\ HSIC & $\rho_u$ \\
+\midrule
+S1 non-Gaussian factor & OLS & 0.497 & -- & -- & -- \\
+ & 2SLS oracle & 0.000 & -- & -- & -- \\
+ & GAN, sample split & 0.511 & 1.00 & -- & 0.44 \\
+ & GAN + HSIC test & 0.505 & 0.70 & 0.30 & 0.48 \\
+ & GAN + HSIC in training & 0.484 & 0.90 & 0.10 & 0.37 \\
+\addlinespace
+S2 non-linear confounding & OLS & 0.580 & -- & -- & -- \\
+ & 2SLS oracle & 0.580 & -- & -- & -- \\
+ & GAN, sample split & 0.528 & 1.00 & -- & 0.32 \\
+ & GAN + HSIC test & 0.573 & 0.60 & 0.40 & 0.32 \\
+ & GAN + HSIC in training & 0.524 & 0.80 & 0.20 & 0.29 \\
+\addlinespace
+S3 Gaussian & OLS & 0.503 & -- & -- & -- \\
+ & 2SLS oracle & 0.006 & -- & -- & -- \\
+ & GAN, sample split & 0.499 & 1.00 & -- & 0.47 \\
+ & GAN + HSIC test & 0.509 & 1.00 & 0.00 & 0.39 \\
+ & GAN + HSIC in training & 0.517 & 1.00 & 0.00 & 0.44 \\
+\addlinespace
+S5 placebo ($\lambda=0$) & OLS & 0.002 & -- & -- & -- \\
+ & 2SLS oracle & 0.014 & -- & -- & -- \\
+ & GAN, sample split & 0.004 & 1.00 & -- & 0.00 \\
+ & GAN + HSIC test & 0.001 & 0.85 & 0.15 & 0.01 \\
+ & GAN + HSIC in training & 0.007 & 0.95 & 0.05 & 0.01 \\
+\addlinespace
+S1 asymmetric sources & OLS & 0.503 & -- & -- & -- \\
+ & 2SLS oracle & -0.003 & -- & -- & -- \\
+ & GAN, sample split & 0.494 & 0.90 & -- & 0.39 \\
+ & GAN + HSIC test & 0.494 & 0.65 & 0.35 & 0.41 \\
+ & GAN + HSIC in training & 0.488 & 0.75 & 0.20 & 0.36 \\
+\addlinespace
+$p=2$, Laplace & OLS & 0.446 & -- & -- & -- \\
+ & 2SLS oracle & -0.002 & -- & -- & -- \\
+ & GAN, sample split & 0.442 & 0.55 & -- & 0.47 \\
+ & GAN + HSIC test & 0.431 & 0.50 & 0.15 & 0.48 \\
+ & GAN + HSIC in training & 0.445 & 0.60 & 0.00 & 0.48 \\
+\addlinespace
+$p=2$, Gaussian & OLS & 0.443 & -- & -- & -- \\
+ & 2SLS oracle & 0.013 & -- & -- & -- \\
+ & GAN, sample split & 0.443 & 0.60 & -- & 0.47 \\
+ & GAN + HSIC test & 0.471 & 0.70 & 0.00 & 0.50 \\
+ & GAN + HSIC in training & 0.436 & 0.50 & 0.05 & 0.48 \\
+\bottomrule
+\end{tabular}
+\end{table}

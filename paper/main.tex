@@ -806,6 +806,20 @@ the omitted endogenous regressor enters the error. The per-variable Sargan test 
 (Remark~\ref{rem:restricted}), not the invalidity of the candidates. The partialled variant
 passes in 95--100\% of replications and, again, returns OLS.
 
+\subsection{Generated instruments with the HSIC test}\label{sec:gan-hsic-mc}
+
+Table~\ref{tab:mc-gan-hsic} is a short run ($n=1000$, 20 replications) of the HSIC variants of
+Section~\ref{sec:gan}, next to the GAN with sample splitting and no HSIC. The HSIC test rejects the
+generated instruments in 30--40\% of replications in S1, the asymmetric design and S2, against
+none of them with Gaussian sources, as Remark~\ref{rem:hsic} predicts. When HSIC enters the
+training loss, the rejection rate falls to 10--20\%: the generator learns to hide the dependence.
+The estimate is the OLS estimate in every variant. The test can reject a generated instrument, but
+it cannot repair it. In the placebo the test rejects in 15\% of replications (3 of 20), a sign that
+the permutation calibration, which ignores the estimation of $\beta$, may over-reject; the run is
+too short to tell.
+
+\input{tables/mc_gan_hsic.tex}
+
 \subsection{Pilot results}\label{sec:pilot}
 
 Tables~\ref{tab:pilot-fast}--\ref{tab:pilot-nn} report a small pilot run (scripts
