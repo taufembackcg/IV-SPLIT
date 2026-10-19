@@ -15,6 +15,10 @@ LABELS = {
     "ols": "OLS", "oracle": "2SLS oracle", "sp": "SP", "lewbel": "Lewbel", "copula": "Copula CF",
     "cumulant": "Cumulant-ICA (L1)", "cumulant_aux": "Cumulant-ICA (L2)",
     "neural_iv": "Neural split IV", "neural_cf": "Neural split CF",
+    "anchored": "Anchored split (L1)", "anchored_aux": "Anchored split (L2)",
+    "anchored_xfit": "Anchored split (L1, cross-fit)",
+    "gan_hausman": "GAN, Hausman filter", "gan_ctest": "GAN, C-test filter",
+    "gan_split": "GAN, sample split", "gan_partialled": "GAN, partialled Sargan",
 }
 SCEN = {
     "s1_latent_nongaussian": "S1 non-Gaussian factor",
@@ -25,7 +29,25 @@ SCEN = {
     "s4_exclusion_violation": "S4 direct effect $0.3$",
     "s5_placebo": "S5 placebo ($\\lambda=0$)",
     "aux_heteroskedastic": "Aux heteroskedastic",
+    "s1_asymmetric": "S1 asymmetric sources",
+    "m2_latent_nongaussian": "$p=2$, Laplace",
+    "m2_gaussian": "$p=2$, Gaussian",
 }
+
+DEFAULT_COLS = [
+    ("Bias", lambda r: fmt(r["median_bias"])),
+    ("RMSE", lambda r: fmt(r["rmse"])),
+    ("Cov.", lambda r: fmt(r["coverage"], 2)),
+    ("NI", lambda r: fmt(r["not_identified"], 2)),
+]
+GAN_COLS = [
+    ("Bias", lambda r: fmt(r["median_bias"])),
+    ("Cov.", lambda r: fmt(r["coverage"], 2)),
+    ("Pass", lambda r: fmt(1 - float(r["not_identified"]), 2) if fmt(r.get("mean_sargan_p")) != "--" else "--"),
+    ("$\\bar p_S$", lambda r: fmt(r.get("mean_sargan_p"), 2)),
+    ("Kept", lambda r: fmt(r.get("mean_n_kept"), 1)),
+    ("$\\rho_u$", lambda r: fmt(r.get("mean_corr_u"), 2)),
+]
 
 
 def read(path):
@@ -41,17 +63,19 @@ def fmt(v, nd=3):
     return "--" if f != f else f"{f:.{nd}f}"
 
 
-def table(rows, caption, label, estimators):
+def table(rows, caption, label, estimators, cols=None):
+    cols = cols or DEFAULT_COLS
+    k = len(cols)
     ns = sorted({int(r["n"]) for r in rows})
     scen = [s for s in SCEN if any(r["scenario"] == s for r in rows)]
     reps = max(int(r["reps"]) for r in rows)
     out = [r"\begin{table}[p]" if len(rows) > 40 else r"\begin{table}[ht]", r"\centering", r"\scriptsize",
            r"\setlength{\tabcolsep}{2.5pt}",
            rf"\caption{{{caption} {reps} replications per cell; $\beta=1$; $\lambda$ as in the text unless fixed by the scenario.}}\label{{{label}}}",
-           r"\begin{tabular}{@{}ll" + "rrrr" * len(ns) + "@{}}", r"\toprule"]
-    out.append(" & " + " & ".join(rf"\multicolumn{{4}}{{c}}{{$n={n}$}}" for n in ns) + r" \\")
-    out.append(" ".join(rf"\cmidrule(lr){{{3 + 4 * i}-{6 + 4 * i}}}" for i in range(len(ns))))
-    out.append("Scenario & Estimator & " + " & ".join(["Bias & RMSE & Cov. & NI"] * len(ns)) + r" \\")
+           r"\begin{tabular}{@{}ll" + "r" * k * len(ns) + "@{}}", r"\toprule"]
+    out.append(" & " + " & ".join(rf"\multicolumn{{{k}}}{{c}}{{$n={n}$}}" for n in ns) + r" \\")
+    out.append(" ".join(rf"\cmidrule(lr){{{3 + k * i}-{2 + k * (i + 1)}}}" for i in range(len(ns))))
+    out.append("Scenario & Estimator & " + " & ".join([" & ".join(h for h, _ in cols)] * len(ns)) + r" \\")
     out.append(r"\midrule")
     for s in scen:
         first = True
@@ -60,10 +84,9 @@ def table(rows, caption, label, estimators):
             for n in ns:
                 m = [r for r in rows if r["scenario"] == s and r["estimator"] == e and int(r["n"]) == n]
                 if not m:
-                    cells += ["--"] * 4
+                    cells += ["--"] * k
                     continue
-                r = m[0]
-                cells += [fmt(r["median_bias"]), fmt(r["rmse"]), fmt(r["coverage"], 2), fmt(r["not_identified"], 2)]
+                cells += [fn(m[0]) for _, fn in cols]
             if all(c == "--" for c in cells):
                 continue
             name = SCEN[s] if first else ""
@@ -80,6 +103,8 @@ def main():
     ap.add_argument("--fast", nargs="+", required=True)
     ap.add_argument("--lam1", required=True)
     ap.add_argument("--nn", required=True)
+    ap.add_argument("--gan")
+    ap.add_argument("--anchored")
     ap.add_argument("--out", default="paper/tables")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
@@ -100,6 +125,20 @@ def main():
     est_nn = [e for e in LABELS if any(r["estimator"] == e for r in nn)]
     (out / "pilot_nn.tex").write_text(table(nn, "Pilot Monte Carlo, neural split (60 epochs). ",
                                             "tab:pilot-nn", est_nn))
+    if a.gan:
+        gan = read(a.gan)
+        est_g = [e for e in LABELS if any(r["estimator"] == e for r in gan)]
+        (out / "mc_gan.tex").write_text(table(
+            gan, "Generated instruments (GAN), $\\lambda=1$. Pass: share of replications in which "
+            "every endogenous regressor passes the weak-instrument and Sargan tests; $\\bar p_S$: "
+            "mean of the smallest per-variable Sargan $p$-value; Kept: candidates left after "
+            "filtering; $\\rho_u$: correlation of the fitted first stage of $x_1$ with $u$. ",
+            "tab:mc-gan", est_g, GAN_COLS))
+    if a.anchored:
+        anc = read(a.anchored)
+        est_a = [e for e in LABELS if any(r["estimator"] == e for r in anc)]
+        (out / "mc_anchored.tex").write_text(table(
+            anc, "Anchored split versus the cumulant layer, $\\lambda=1$. ", "tab:mc-anchored", est_a))
 
 
 if __name__ == "__main__":

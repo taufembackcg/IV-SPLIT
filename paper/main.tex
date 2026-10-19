@@ -719,7 +719,39 @@ and the share of replications in which the method declares that $\beta$ is not i
 
 \subsection{Generated instruments}\label{sec:gan-mc}
 
-\emph{Results pending.}
+Table~\ref{tab:mc-gan} runs the procedure of Section~\ref{sec:gan}: 300 training epochs, two
+candidates per endogenous regressor, and $\lambda=1$ (S2 keeps $\lambda=0.3$ and S5 keeps
+$\lambda=0$). Besides the Hausman filter, it reports the C-test filter, a version trained on one half
+and evaluated on the other, and the partialled Sargan variant. The $p=2$ designs draw
+$x_j = g_j(w)+a_jH+e_{Xj}$ with loadings $a=(1,0.5)$ and $\beta=(1,1)$; the table reports
+$\hat\beta_1$.
+
+\input{tables/mc_gan.tex}
+
+\paragraph{The procedure passes its tests and returns OLS.} With one endogenous regressor the
+generated instruments pass the weak-instrument and Sargan tests in 97--100\% of replications, with
+first-stage $F$ in the thousands. The filters keep almost all candidates (1.9 of 2 on average).
+The median bias equals that of OLS to two decimals in S1, S3 and the asymmetric design and is within
+$0.08$ of it in S2, and coverage is essentially zero. The fitted first stage is strongly correlated
+with the structural error ($\rho_u\approx0.2$--$0.5$). (In S2 the ``oracle'' $e_X$ is itself the
+confounded variable and is not a valid instrument.)
+This is Proposition~\ref{prop:gan} at work. Under linear confounding (S1, S3) no test has power.
+In the asymmetric design and in S2, valid functions of $x$ exist, but nothing in the objective
+\eqref{eq:gan-loss} points towards them; the generator settles on $z\approx x$, which maximises $F$.
+
+\paragraph{Sample splitting and the C test do not help.} Training on one half and testing on the
+other removes the in-sample over-fitting of the tests, but not the invalidity, which is a population
+property. Replacing the Hausman contrast by the C statistic changes nothing, because all candidates
+share the same pseudo-true value.
+
+\paragraph{Placebo.} With $\lambda=0$, OLS is consistent and so is the procedure: it does no harm
+when there is nothing to correct, but it cannot tell this case from the confounded ones.
+
+\paragraph{Restricted Sargan with $p=2$.} In the restricted equations of \eqref{eq:gan-restricted}
+the omitted endogenous regressor enters the error. The per-variable Sargan test then rejects in
+30--60\% of replications, but the bias is unchanged: the rejections reflect the omitted regressor
+(Remark~\ref{rem:restricted}), not the invalidity of the candidates. The partialled variant
+passes in 95--100\% of replications and, again, returns OLS.
 
 \subsection{Pilot results}\label{sec:pilot}
 
