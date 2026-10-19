@@ -66,3 +66,38 @@ def test_reproducible_given_seed(make_sample):
     a = split_iv(s.y, s.x, s.W, SplitConfig(**FAST, seed=3), n_boot=9)
     b = split_iv(s.y, s.x, s.W, SplitConfig(**FAST, seed=3), n_boot=9)
     assert a.iv.beta == pytest.approx(b.iv.beta)
+
+
+# --- anchored split -------------------------------------------------------
+
+def test_anchor_forces_outcome_input():
+    assert SplitConfig(anchor="sign").use_outcome
+    assert not SplitConfig().use_outcome
+
+
+def test_anchored_split_follows_the_anchor(make_sample):
+    s = make_sample("s1_latent_nongaussian", n=4000, lam=1.0, seed=1)
+    res = split_iv(s.y, s.x, s.W, SplitConfig(epochs=40, anchor="sign"), n_boot=29)
+    a = res.iv.extra["beta_anchor"]
+    assert abs(res.iv.beta - a) < 0.15
+    assert res.iv.se >= res.iv.extra["se_naive"]
+    assert np.isnan(res.cf.beta)  # no control function when the network sees y
+
+
+def test_anchor_without_outcome_cannot_be_matched(make_sample):
+    # Exchangeable sources: E[u | x_tilde] is linear, so no function of
+    # (x_tilde, w) is both relevant and orthogonal to u; the learned instrument
+    # ignores the anchor and the estimate stays near OLS.
+    s = make_sample("s1_latent_nongaussian", n=4000, lam=1.0, seed=1)
+    cfg = SplitConfig(epochs=40, anchor="sign")
+    cfg.use_outcome = False
+    res = split_iv(s.y, s.x, s.W, cfg, n_boot=9)
+    assert abs(res.iv.beta - res.iv.extra["beta_anchor"]) > 0.2
+
+
+def test_crossfit_reports_both_halves(make_sample):
+    s = make_sample("aux_heteroskedastic", n=2000, lam=1.0)
+    res = split_iv(s.y, s.x, s.W, SplitConfig(**FAST, anchor="aux", crossfit=True), n_boot=9)
+    b1, b2 = res.iv.extra["beta_halves"]
+    assert res.iv.beta == pytest.approx((b1 + b2) / 2)
+    assert "cross-fit" in res.iv.name

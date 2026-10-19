@@ -137,3 +137,38 @@ def scenario(name: str, **overrides) -> DGPConfig:
         raise KeyError(f"unknown scenario {name!r}; choose from {sorted(SCENARIOS)}")
     params = {**SCENARIOS[name], **overrides}
     return DGPConfig(**params)
+
+
+# ---------------------------------------------------------------------------
+# Several endogenous regressors (used by the GAN-instrument experiment)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MultiSample:
+    y: np.ndarray
+    X: np.ndarray          # (n, p) endogenous regressors
+    W: np.ndarray
+    Z_oracle: np.ndarray   # (n, p) planted exogenous variation e_Xj
+    u: np.ndarray
+    H: np.ndarray
+    beta: np.ndarray
+
+
+def simulate_multi(n: int = 2000, p: int = 2, lam: float = 1.0, beta=None,
+                   loadings=None, dist: str = "laplace", g: str = "linear", n_w: int = 2,
+                   rng: np.random.Generator | int | None = None) -> MultiSample:
+    """p endogenous regressors sharing one latent confounder:
+
+        x_j = g_j(w) + a_j H + e_Xj,   u = lam H + e_Y,   y = X beta + delta' w + u.
+    """
+    rng = np.random.default_rng(rng)
+    beta = np.ones(p) if beta is None else np.asarray(beta, dtype=float)
+    a = np.linspace(1.0, 0.5, p) if loadings is None else np.asarray(loadings, dtype=float)
+    W = rng.standard_normal((n, n_w))
+    H = draw_source(rng, dist, n)
+    E = np.column_stack([draw_source(rng, dist, n) for _ in range(p)])
+    G = np.column_stack([g_function(np.roll(W, j, axis=1), g) for j in range(p)])
+    X = G + H[:, None] * a + E
+    u = lam * H + draw_source(rng, dist, n)
+    y = X @ beta + W @ np.full(n_w, 0.5) + u
+    return MultiSample(y=y, X=X, W=W, Z_oracle=E, u=u, H=H, beta=beta)

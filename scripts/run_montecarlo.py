@@ -33,12 +33,13 @@ def main(argv=None):
                     help=f"subset of {sorted(ESTIMATORS)} or 'all'")
     ap.add_argument("--seed", type=int, default=20261019)
     ap.add_argument("--out", default="results")
+    ap.add_argument("--jobs", type=int, default=1, help="cells run in parallel processes")
     args = ap.parse_args(argv)
 
     scenarios = sorted(SCENARIOS) if args.all_scenarios else args.scenarios
     estimators = sorted(ESTIMATORS) if args.estimators == ["all"] else args.estimators
     records, summary = run_grid(scenarios, args.n, args.lam, args.reps, estimators,
-                                seed=args.seed, progress=True)
+                                seed=args.seed, progress=True, jobs=args.jobs)
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     write_csv(records, out / "replications.csv")

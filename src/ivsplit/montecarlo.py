@@ -35,6 +35,27 @@ def _neural(kind: str, **kw) -> EstimatorFn:
     return run
 
 
+def _anchored(**kw) -> EstimatorFn:
+    def run(s, rng):
+        from .split import SplitConfig, split_iv
+        cfg = SplitConfig(seed=int(rng.integers(1 << 31)), **kw)
+        return split_iv(s.y, s.x, s.W, cfg, n_boot=49, rng=rng).iv
+    return run
+
+
+def _gan(**kw) -> EstimatorFn:
+    def run(s, rng):
+        from .gan_iv import GanIVConfig, gan_iv
+        e = gan_iv(s.y, s.x, s.W, GanIVConfig(seed=int(rng.integers(1 << 31)), **kw), rng=rng)
+        idx = e.extra.pop("eval_idx")
+        xhat = e.extra.pop("xhat")
+        e.extra.pop("history", None)
+        # correlation of the fitted first stage with the true structural error
+        e.extra["corr_u"] = float(np.corrcoef(xhat, s.u[idx])[0, 1])
+        return e
+    return run
+
+
 ESTIMATORS: dict[str, EstimatorFn] = {
     "ols": lambda s, rng: est.ols(s.y, s.x, s.W),
     "oracle": lambda s, rng: est.oracle_tsls(s.y, s.x, s.W, s.z_oracle),
@@ -46,7 +67,16 @@ ESTIMATORS: dict[str, EstimatorFn] = {
                                                     n_boot=99, rng=rng),
     "neural_iv": _neural("iv", epochs=60),
     "neural_cf": _neural("cf", epochs=60),
+    "anchored": _anchored(epochs=60, anchor="sign"),
+    "anchored_aux": _anchored(epochs=60, anchor="aux"),
+    "anchored_xfit": _anchored(epochs=60, anchor="sign", crossfit=True),
+    "gan_hausman": _gan(filter="hausman"),
+    "gan_ctest": _gan(filter="ctest"),
+    "gan_split": _gan(filter="hausman", sample_split=True),
 }
+
+# Extra per-replication diagnostics carried into the records when an estimator reports them.
+EXTRA_FIELDS = ("F", "sargan_p", "n_kept", "corr_u")
 
 FAST_ESTIMATORS = ["ols", "oracle", "sp", "lewbel", "copula", "cumulant"]
 
@@ -70,6 +100,7 @@ def run_cell(scenario_name: str, n: int, lam: float, reps: int, estimators: list
                 scenario=scenario_name, n=n, lam=lam, rep=rep, estimator=name,
                 beta_hat=e.beta, se=e.se, lo=lo, hi=hi, beta=cfg.beta,
                 identified=e.identified,
+                **{f: float(e.extra.get(f, np.nan)) for f in EXTRA_FIELDS},
             ))
     return records
 
@@ -97,17 +128,45 @@ def summarise(records: list[dict]) -> list[dict]:
             coverage=float(np.mean(cover[has_ci])) if has_ci.any() else np.nan,
             rejection=float(1 - np.mean(cover[has_ci])) if has_ci.any() else np.nan,
             not_identified=float(np.mean([not r["identified"] for r in rs])),
+            **{f"mean_{f}": _nanmean([r.get(f, np.nan) for r in rs]) for f in EXTRA_FIELDS},
         ))
     return out
 
 
+def _nanmean(v) -> float:
+    v = np.asarray(v, dtype=float)
+    return float(np.mean(v[np.isfinite(v)])) if np.isfinite(v).any() else np.nan
+
+
+def _worker_init():
+    try:
+        import torch
+        torch.set_num_threads(1)
+    except ImportError:  # pragma: no cover
+        pass
+
+
+def _run_cell_args(args):
+    return run_cell(*args)
+
+
 def run_grid(scenarios, ns, lams, reps: int, estimators: list[str], seed: int = 0,
-             progress: bool = False) -> tuple[list[dict], list[dict]]:
+             progress: bool = False, jobs: int = 1) -> tuple[list[dict], list[dict]]:
+    """Run every cell of the grid; ``jobs`` > 1 runs cells in parallel processes."""
+    cells = [(sc, n, lam, reps, estimators, seed) for sc, n, lam in itertools.product(scenarios, ns, lams)]
     records = []
-    for sc, n, lam in itertools.product(scenarios, ns, lams):
-        if progress:
-            print(f"[mc] {sc} n={n} lam={lam}", flush=True)
-        records += run_cell(sc, n, lam, reps, estimators, seed)
+    if jobs > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init) as ex:
+            for cell, recs in zip(cells, ex.map(_run_cell_args, cells)):
+                if progress:
+                    print(f"[mc] done {cell[0]} n={cell[1]} lam={cell[2]}", flush=True)
+                records += recs
+    else:
+        for cell in cells:
+            if progress:
+                print(f"[mc] {cell[0]} n={cell[1]} lam={cell[2]}", flush=True)
+            records += run_cell(*cell)
     return records, summarise(records)
 
 

@@ -134,6 +134,136 @@ variant of the idea.
   restriction of an external instrument for another untestable hypothesis.
 \end{enumerate}
 
+\subsection{The generated-instrument procedure, formally}\label{sec:gan}
+
+To test the critique rather than merely state it, we implement the procedure in its most
+favourable form and include it in the Monte Carlo (Section~\ref{sec:gan-mc}).
+
+\paragraph{Setup.} The structural equation is $y = X\beta + W\delta + u$ with
+$X=(x_1,\dots,x_p)\in\mathbb{R}^{n\times p}$ possibly endogenous and $W\in\mathbb{R}^{n\times q}$
+exogenous (an intercept included). Let $M_W = I - W(W'W)^{-1}W'$ and write $\tilde a = M_W a$ for any
+vector or matrix $a$. For a matrix $A$ with full column rank, $P_A = A(A'A)^{-1}A'$.
+
+\paragraph{Candidates.} A generator $G_\theta:\mathbb{R}^{p+q+d}\to\mathbb{R}^{2p}$ maps each observation
+$(x_i,w_i,\nu_i)$, with $\nu_i\sim N(0,I_d)$ independent noise, to two candidates per endogenous
+regressor,
+\begin{equation}\label{eq:gan-candidates}
+  Z = [Z_1,\dots,Z_p],\qquad Z_j = (z_{j1}, z_{j2}) \in\mathbb{R}^{n\times 2},\qquad
+  z_{j\ell,i} = G_\theta(x_i,w_i,\nu_i)_{(j,\ell)} .
+\end{equation}
+The outcome $y$ is \emph{not} an input. Write $P_j = P_{\tilde Z_j}$.
+
+\paragraph{Weak-instrument test, one per endogenous regressor.} The first stage of $x_j$ uses only
+its own pair, controlling for $W$:
+\begin{equation}\label{eq:gan-F}
+  F_j = \frac{\tilde x_j'P_j\tilde x_j/2}{\tilde x_j'(I-P_j)\tilde x_j/(n-q-2)} ,
+  \qquad \text{pass if } F_j > 10 ,
+\end{equation}
+the rule of thumb of \citet{stockyogo2005}. In the evaluation we use the heteroskedasticity-robust
+Wald version $F_j^{\mathrm{rob}} = \hat\pi_j'\hat V_{\pi_j}^{-1}\hat\pi_j/2$, where $\hat\pi_j$ is the
+coefficient vector on $Z_j$ in the regression of $x_j$ on $(Z_j,W)$ and $\hat V_{\pi_j}$ its HC
+covariance. With $p>1$ this per-variable statistic measures the strength of each pair in isolation;
+it is not the conditional test of \citet{sanderson2016}, which accounts for the other endogenous
+regressors.
+
+\paragraph{Sargan test, one per endogenous regressor, in a restricted equation.} For each $j$ the
+restricted equation keeps only $x_j$:
+\begin{equation}\label{eq:gan-restricted}
+  \tilde y = \beta_j\tilde x_j + e_j,\qquad e_j \equiv \tilde u + \sum_{k\neq j}\beta_k\tilde x_k ,
+\end{equation}
+estimated by 2SLS with $Z_j$ only,
+$\hat\beta_j^{R} = \tilde x_j'P_j\tilde y\,/\,\tilde x_j'P_j\tilde x_j$, with
+$\hat e_j = \tilde y - \hat\beta_j^R\tilde x_j$ and
+\begin{equation}\label{eq:gan-S}
+  S_j = n\,\frac{\hat e_j'P_j\hat e_j}{\hat e_j'\hat e_j}
+  \;\xrightarrow{d}\; \chi^2_1 \quad\text{under } H_{0j}:\ \E[\tilde Z_j' e_j] = 0 ,
+  \qquad \text{pass if } \Pr(\chi^2_1 > S_j) > \alpha .
+\end{equation}
+In the \emph{partialled} variant, $\tilde y$ in \eqref{eq:gan-restricted} is replaced by
+$\tilde y - \sum_{k\ne j}\hat\beta_k\tilde x_k$, with $\hat\beta$ the full-system estimate below, so
+that the other endogenous regressors leave the error.
+
+\paragraph{Full system.} With all kept candidates $Z_K$,
+$\hat\beta_K = (\tilde X'P_{\tilde Z_K}\tilde X)^{-1}\tilde X'P_{\tilde Z_K}\tilde y$ and
+$\hat\varepsilon = \tilde y - \tilde X\hat\beta_K$; $\hat V_K$ denotes its HC covariance.
+
+\paragraph{Adversarial training.} A critic $D_\phi:\mathbb{R}^{2p}\to\mathbb{R}$ looks for a function
+of the candidates that predicts the system residual, i.e.\ a moment violation:
+$\max_\phi \hat\rho^{\,2}\big(D_\phi(\tilde Z_\theta),\hat\varepsilon_\theta\big)$, with
+$\hat\rho$ the sample correlation. The generator solves
+\begin{equation}\label{eq:gan-loss}
+  \min_\theta\; \sum_{j=1}^p\Big[\big(\log F^\ast - \log F_j(\theta)\big)_+
+     + \frac{\big(S_j(\theta)-c_\alpha\big)_+}{c_\alpha}\Big]
+     + \zeta\,\max_\phi\,\hat\rho^{\,2}\big(D_\phi(\tilde Z_\theta),\hat\varepsilon_\theta\big),
+  \qquad c_\alpha = \chi^2_{1,1-\alpha},
+\end{equation}
+by alternating gradient steps on $\phi$ and $\theta$; $F_j$, $S_j$ and $\hat\varepsilon$ are
+differentiable in $Z$ (a small ridge term regularises $\tilde Z_j'\tilde Z_j$). We use
+$F^\ast=100$, $\alpha=0.05$ and $\zeta=1$.
+
+\paragraph{Filtering the excess.} Let $K_j$ be the kept candidates of $x_j$ and $K=\cup_j K_j$, with
+$K_j=\{z_{j1},z_{j2}\}$ initially. A candidate $c\in K_j$ is \emph{droppable} if $|K_j|\ge2$. For
+each droppable $c$,
+\begin{equation}\label{eq:gan-hausman}
+  \mathcal{H}_c = (\hat\beta_{K\setminus c}-\hat\beta_K)'
+     \big(\hat V_{K\setminus c}-\hat V_K\big)^{+}
+     (\hat\beta_{K\setminus c}-\hat\beta_K) \;\approx\; \chi^2_p ,
+\end{equation}
+with ${}^{+}$ the Moore--Penrose inverse (the HC difference need not be positive semi-definite).
+Drop $c^\ast = \arg\max_c\mathcal{H}_c$ if $\mathcal{H}_{c^\ast} > \chi^2_{p,1-\alpha}$ and repeat;
+stop when nothing is droppable or nothing is significant. The C-test variant replaces
+$\mathcal{H}_c$ by $C_c = J(K) - J(K\setminus c)\approx\chi^2_1$ \citep{eichenbaum1988}. The final
+estimate is $\hat\beta_K$, and the procedure declares success if
+$\bigcap_j\{F_j^{\mathrm{rob}}>10\}\cap\{S_j\text{ not rejected}\}$ on the final $K_j$ (a single
+remaining candidate leaves $S_j$ undefined, which counts as not rejected).
+
+\begin{proposition}[What the tests can see]\label{prop:gan}
+Let $Z=G(X,W,\nu)$ for any measurable $G$ with $\E\|Z\|^2<\infty$ and $\nu$ independent of
+$(X,W,u)$, and suppose the conditional confounding is linear,
+\begin{equation}\label{eq:linear-confounding}
+  \E[u\mid X,W] = \tilde X'c\quad\text{for some } c\in\mathbb{R}^p .
+\end{equation}
+Then (a) for every partialled candidate $\tilde z$ and every $b$,
+$\E[\tilde z(\tilde y-\tilde X'b)] = \E[\tilde z\tilde X'](\beta+c-b)$, so all moment conditions of the full system
+hold at $b^\ast=\beta+c$, the probability limit of OLS; (b) if $\E[\tilde Z\tilde X']$ has rank $p$,
+$\hat\beta_K\to_p\beta+c$ for every kept set $K$, the system $J$ statistic converges to its null
+distribution, and $\mathcal{H}_c$ and $C_c$ converge to their null distributions, so the filter has
+asymptotic rejection rate $\alpha$ whatever the bias $c$; (c) with $p=1$ the same holds for
+$S_1$ in \eqref{eq:gan-S}; (d) at $b^\ast$ the critic's population objective is zero:
+$\max_\phi\rho^2\big(D_\phi(\tilde Z),\varepsilon^\ast\big)=0$ for
+$\varepsilon^\ast=\tilde y-\tilde X'b^\ast$.
+\end{proposition}
+
+\begin{proof}
+Since $\nu$ is independent of $(X,W,u)$, $\E[u\mid X,W,\nu]=\E[u\mid X,W]=\tilde X'c$. The
+population partialling-out is linear in $W$ and $\E[Wu]=0$, so $\tilde u=u$ and $\tilde z$ is a
+function of $(X,W,\nu)$. By iterated expectations,
+$\E[\tilde z u]=\E[\tilde z\,\E[u\mid X,W,\nu]]=\E[\tilde z\tilde X']c$, and since
+$\tilde y - \tilde X'b = \tilde X'(\beta-b)+u$, (a) follows. Under (a) every subset of candidates identifies the same pseudo-true
+value $b^\ast$, so the standard GMM arguments give consistency of $\hat\beta_K$ for $b^\ast$ and the
+null limiting distributions of $J$, of the C statistic and of the Hausman contrast, which only
+compare estimators of the same pseudo-true value. For (c), with $p=1$ the restricted equation is the
+full system. For (d), $\varepsilon^\ast = u - \E[u\mid X,W]$, so
+$\E[\varepsilon^\ast\mid X,W,\nu]=0$ and $\Cov(D(\tilde Z),\varepsilon^\ast)=0$ for every $D$.
+\end{proof}
+
+Condition \eqref{eq:linear-confounding} holds when the sources are jointly Gaussian, and also in the
+canonical model \eqref{eq:canonical} when $H$ and $e_X$ are exchangeable, since then
+$\E[H\mid H+e_X]=(H+e_X)/2$. Under it the procedure \emph{always} passes asymptotically (as long as
+$F_j$ is large, which the generator achieves by letting $z_{j\ell}\approx x_j$) and returns the OLS
+limit. When the confounding is non-linear the tests regain some power, but only against the part of
+the bias that differs across candidates; a bias common to all candidates remains invisible.
+
+\begin{remark}[Restricted Sargan with several endogenous regressors]\label{rem:restricted}
+With $p>1$ the null $H_{0j}$ of \eqref{eq:gan-S} is
+$\E[\tilde Z_j'\tilde u]+\sum_{k\ne j}\beta_k\E[\tilde Z_j'\tilde x_k]=0$, which requires, besides
+validity, that the two candidates for $x_j$ imply the same ratio
+$\E[z_{j\ell}\tilde x_k]/\E[z_{j\ell}\tilde x_j]$ for every $k\ne j$. A valid pair can therefore fail
+the restricted test, and an invalid pair can pass it when the omitted-regressor term offsets the
+endogeneity. The partialled variant removes the omitted regressors at the cost of using the
+full-system estimate.
+\end{remark}
+
 The question therefore becomes: \emph{which identifying hypothesis is the researcher willing to
 maintain in order to perform the split \eqref{eq:split}?} We answer it with independence and
 non-Gaussianity of latent sources.
@@ -364,11 +494,14 @@ inputs does not help when $w$ is independent of the sources. Two consequences fo
   $\ty - \beta_{\mathrm{OLS}}\tx$ is uncorrelated with $\tx$, so the HSIC-X term only penalises
   higher-order dependence, which is weak in moderate samples. Our pilot simulations
   (Section~\ref{sec:pilot}) confirm that the unanchored split converges near OLS.
-  \item What \emph{is} attainable is \emph{moment} validity. Writing $m(\tx)=\E[H\mid\tx]$, any
-  function $f$ with $\E[f(\tx)m(\tx)]=0$ and $\E[f(\tx)\tx]\ne0$ is a valid and relevant instrument,
-  since $\E[f(\tx)u] = \lambda\E[f(\tx)m(\tx)]$. Such functions exist in abundance (they form a
-  subspace of codimension one), but selecting one requires knowledge of $m$, which in turn depends on
-  the laws of $H$ and $e_X$---exactly what the cumulant layer identifies up to labels.
+  \item What \emph{is} attainable is at most \emph{moment} validity. Writing $m(\tx)=\E[H\mid\tx]$,
+  $\E[f(\tx)u] = \lambda\E[f(\tx)m(\tx)]$, so $f$ is valid iff $\E[f(\tx)m(\tx)]=0$ and relevant iff
+  $\E[f(\tx)\tx]\ne0$. If $m$ is not a.s.\ proportional to $\tx$, such functions exist in abundance
+  (the valid ones form a closed subspace of codimension one, which is not contained in the
+  irrelevant ones). If $m(\tx)=a\,\tx$, as with Gaussian or exchangeable sources, then
+  $\E[fm]=a\E[f\tx]$ and \emph{no} function of $(\tx,w)$ is both valid and relevant. Either way,
+  selecting a valid $f$ requires knowledge of $m$, which depends on the laws of $H$ and
+  $e_X$---exactly what the cumulant layer identifies up to labels.
 \end{itemize}
 
 There are also non-generic cases in which an exact split exists, for example when $H$ is discrete
@@ -377,23 +510,63 @@ latent-mixture approaches \citep{ebbes2005}.
 
 \subsection{Anchored split}\label{sec:anchored}
 
-Proposition~\ref{prop:nosplit} motivates a revised estimation layer that lets the identification
-layer do the identifying and the network do the approximating:
+Proposition~\ref{prop:nosplit} motivates an estimation layer in which the identification layer does
+the identifying and the network does the approximating.
+
+\paragraph{Algorithm.} Split the sample into halves $A$ and $B$.
 \begin{enumerate}[label=(\roman*)]
-  \item On sample $A$, estimate $\beta$ (and, if desired, the source laws) with the cumulant
-  layer and label the roots with (L1) or (L2), obtaining $\hat\beta_A$.
-  \item Train $f_\theta$ on $A$ with $\beta$ fixed at $\hat\beta_A$ in the HSIC-X term, so that the
-  network searches for instrument functions $f(\tx,w)$ whose implied moment conditions are
-  approximately satisfied at the identified value, and use the relevance band to keep them
-  informative.
-  \item On $B$, estimate $\beta$ by 2SLS with the learned functions and test the over-identifying
-  restrictions they imply.
+  \item \emph{Anchor.} On $A$, compute the Cumulant-ICA estimate $\hat\beta_A$ (Section~\ref{sec:identification}),
+  with the roots labelled by (L1) or (L2), and its bootstrap standard error $\hat s_A$.
+  \item \emph{Learn the instrument.} Let $\hat\varepsilon_A=\ty-\hat\beta_A\tx$ on $A$. A network
+  $f_\theta:(\tx,w,\ty)\mapsto z$ minimises
+  \begin{equation}\label{eq:anchored-loss}
+  \begin{aligned}
+  \mathcal{L}_A(\theta) ={}& \alpha\,\HSIC(z,\tx-z) + \gamma\,\HSIC(\hat\varepsilon_A,z)
+     + \kappa\,\hat\rho^{\,2}(z,\hat\varepsilon_A)\\
+     &+ \eta\big[(c_{\min}-\hat\rho^{\,2}(z,\tx))_+ + (\hat\rho^{\,2}(z,\tx)-c_{\max})_+\big],
+  \end{aligned}
+  \end{equation}
+  i.e.\ the loss \eqref{eq:loss} with $\beta$ held at $\hat\beta_A$ and an explicit moment penalty
+  ($\kappa=10$).
+  \item \emph{Estimate.} On $B$, $z_B=f_{\hat\theta}(\tx_B,w_B,\ty_B)$ and
+  $\hat\beta_B = \sum_B z\ty/\sum_B z\tx$ (2SLS with $w$ as controls), with standard error
+  $\hat s = (\hat s_B^2+\hat s_A^2)^{1/2}$, where $\hat s_B$ is the HC standard error on $B$.
+  \item \emph{Cross-fitting (optional).} Swap $A$ and $B$ and average the two estimates; the
+  reported standard error $\big((\hat s^2_{(1)}+\hat s^2_{(2)})/4\big)^{1/2}$ ignores the dependence
+  between the folds.
 \end{enumerate}
-The non-linear value of the network lies where the linear layer is silent: a non-linear
-first stage $g(w)$, auxiliary variables that modulate the law of $e_X$ (Assumption~\ref{ass:class}),
-and efficient combination of moment conditions. Whether the anchored split improves on the plain
-cumulant estimator in finite samples is an empirical question that the Monte Carlo is designed to
-answer.
+
+\paragraph{Why $\ty$ is an input.} By the second bullet of Section~\ref{sec:cannot}, when $m$ is
+linear no function of $(\tx,w)$ alone is both valid and relevant; the pilot confirms that without
+$\ty$ the learned instrument ignores the anchor. With $\ty$ available, the linear function
+$z = \tx - \pi\hat\varepsilon_A$ with
+$\pi=\Cov(\tx,\hat\varepsilon_A)/\Var(\hat\varepsilon_A)$ already satisfies
+$\Cov(z,\hat\varepsilon_A)=0$. Because $r=\tx-z$ then contains the outcome, the control-function
+version is not defined for the anchored split.
+
+\begin{proposition}[The anchored split transfers the anchor]\label{prop:anchor}
+Fix the first-fold quantities ($\hat\beta_A,\hat\theta$) and let $z=f_{\hat\theta}(\tx,w,\ty)$ satisfy
+$\E[z(\ty-\hat\beta_A\tx)\mid A]=0$ and $\E[z\tx\mid A]\neq0$. Then
+$\hat\beta_B\to_p\hat\beta_A$ conditionally on $A$, and
+$\hat\beta_B-\beta=(\hat\beta_A-\beta)+O_p(n^{-1/2})$, where the second term has conditional mean zero.
+\end{proposition}
+
+\begin{proof}
+On $B$, $\hat\beta_B=\hat\beta_A+\sum_B z(\ty-\hat\beta_A\tx)/\sum_B z\tx$. Conditionally on $A$ the
+summands are i.i.d.\ with mean zero in the numerator and non-zero mean in the denominator, so the
+ratio is $O_p(n^{-1/2})$ with conditional mean zero to first order.
+\end{proof}
+
+Proposition~\ref{prop:anchor} makes the role of the network explicit. It adds no identifying
+information, since the estimate inherits the anchor's error, which justifies adding $\hat s_A^2$ to the
+variance. What the network can contribute is a vehicle for inference on the held-out half (robust
+first stage, Anderson--Rubin sets, over-identification with several learned functions), flexible
+partialling out of a non-linear $g(w)$, and efficient combination of moment conditions. The
+over-identifying restrictions of several learned functions cannot test the anchor, because all of
+them are built to be orthogonal to $\hat\varepsilon_A$; the label choice
+(Assumption~\ref{ass:label}) remains untestable. Whether the anchored split improves on the plain
+cumulant estimator in finite samples is an empirical question, addressed in
+Section~\ref{sec:anchored-mc}.
 
 \section{Testing battery}\label{sec:tests}
 
@@ -539,6 +712,14 @@ versions). Delbianco's test is run only in an auxiliary design with a planted in
 bias, median bias and RMSE of $\hat\beta$; coverage of nominal 95\% intervals (Wald, bootstrap or
 Anderson--Rubin); size and power of each test of Section~\ref{sec:tests} against planted violations;
 and the share of replications in which the method declares that $\beta$ is not identified.
+
+\subsection{Anchored split}\label{sec:anchored-mc}
+
+\emph{Results pending.}
+
+\subsection{Generated instruments}\label{sec:gan-mc}
+
+\emph{Results pending.}
 
 \subsection{Pilot results}\label{sec:pilot}
 
