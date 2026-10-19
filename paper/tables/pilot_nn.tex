@@ -1,1 +1,28 @@
-\textit{[pilot_nn pending]}
+\begin{table}[ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2.5pt}
+\caption{Pilot Monte Carlo, neural split (60 epochs).  25 replications per cell; $\beta=1$; $\lambda$ as in the text unless fixed by the scenario.}\label{tab:pilot-nn}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+ & \multicolumn{4}{c}{$n=2000$} \\
+\cmidrule(lr){3-6}
+Scenario & Estimator & Bias & RMSE & Cov. & NI \\
+\midrule
+S1 non-Gaussian factor & OLS & 0.251 & 0.251 & 0.00 & 0.00 \\
+ & Cumulant-ICA (L1) & -0.033 & 0.547 & 0.96 & 0.96 \\
+ & Neural split IV & 0.264 & 0.259 & 0.00 & 0.96 \\
+ & Neural split CF & 0.314 & 0.497 & 0.88 & 0.96 \\
+\addlinespace
+S3 Gaussian & OLS & 0.251 & 0.253 & 0.00 & 0.00 \\
+ & Cumulant-ICA (L1) & 0.080 & 3.526 & 1.00 & 1.00 \\
+ & Neural split IV & 0.249 & 0.255 & 0.00 & 1.00 \\
+ & Neural split CF & 0.324 & 0.620 & 0.76 & 1.00 \\
+\addlinespace
+Aux heteroskedastic & OLS & 0.248 & 0.252 & 0.00 & 0.00 \\
+ & Cumulant-ICA (L1) & -0.045 & 0.893 & 0.92 & 0.92 \\
+ & Neural split IV & 0.262 & 0.260 & 0.00 & 0.96 \\
+ & Neural split CF & 0.489 & 0.644 & 0.48 & 0.96 \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -542,11 +542,20 @@ and the share of replications in which the method declares that $\beta$ is not i
 
 \subsection{Pilot results}\label{sec:pilot}
 
-Tables~\ref{tab:pilot-fast} and~\ref{tab:pilot-nn} report a small pilot run
-($\lambda = 0.5$, labelling (L1) with $\lambda>0$ known) produced by
-\texttt{scripts/run\_montecarlo.py}; the full grid is left for the next stage.
+Tables~\ref{tab:pilot-fast}--\ref{tab:pilot-nn} report a small pilot run (scripts
+\texttt{run\_montecarlo.py} and \texttt{make\_tables.py}). Table~\ref{tab:pilot-fast}
+covers all scenarios with the closed-form estimators at $\lambda=0.5$ (S2 uses $\lambda=0.3$ and S5 uses
+$\lambda=0$). Table~\ref{tab:pilot-lam1} contrasts S1 and S3 at $\lambda=1$ for $n$ up to $10000$.
+Table~\ref{tab:pilot-nn} runs the neural split at $n=2000$. Labelling (L1) assumes $\lambda>0$ is
+known, and (L2) uses $w_1$ as the auxiliary variable. The full grid is left for the next stage.
+In all tables, Bias is the median bias and Cov.\ is the coverage of the nominal 95\% interval (Wald
+with robust standard errors; percentile bootstrap for Cumulant-ICA). NI is the share of replications
+in which the estimator reports that $\beta$ is not identified: $D$ below the $\chi^2_1$ 95\%
+critical value, and for the split also $F<10$ or an unbounded Anderson--Rubin set.
 
 \input{tables/pilot_fast.tex}
+
+\input{tables/pilot_lam1.tex}
 
 \input{tables/pilot_nn.tex}
 

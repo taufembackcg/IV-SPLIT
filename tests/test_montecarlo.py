@@ -65,3 +65,8 @@ def test_neural_estimators_share_one_fit():
     cf = ESTIMATORS["neural_cf"](s, rng)
     assert len(s._split_cache) == 1
     assert iv.name == "Neural-split IV" and cf.name == "Neural-split CF"
+
+
+def test_scenario_lambda_wins_over_grid():
+    recs = run_cell("s5_placebo", n=200, lam=0.5, reps=1, estimators=["ols"])
+    assert recs[0]["lam"] == 0.0

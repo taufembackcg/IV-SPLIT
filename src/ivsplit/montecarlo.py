@@ -16,7 +16,7 @@ from typing import Callable
 import numpy as np
 
 from . import estimators as est
-from .dgp import scenario, simulate
+from .dgp import SCENARIOS, scenario, simulate
 
 EstimatorFn = Callable[[object, np.random.Generator], est.Estimate]
 
@@ -54,6 +54,9 @@ FAST_ESTIMATORS = ["ols", "oracle", "sp", "lewbel", "copula", "cumulant"]
 def run_cell(scenario_name: str, n: int, lam: float, reps: int, estimators: list[str],
              seed: int = 0, **overrides) -> list[dict]:
     """Run one grid cell and return one record per (replication, estimator)."""
+    # Parameters fixed by the scenario definition (e.g. lam = 0 in the placebo)
+    # take precedence over the grid value.
+    lam = SCENARIOS[scenario_name].get("lam", lam)
     cfg = scenario(scenario_name, n=n, lam=lam, **overrides)
     ss = np.random.SeedSequence([seed, n, int(round(1000 * lam)), zlib.crc32(scenario_name.encode())])
     records = []

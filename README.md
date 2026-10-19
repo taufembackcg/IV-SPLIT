@@ -19,14 +19,17 @@ This repository holds a research proposal and its Monte Carlo testbed. The idea 
 ```bash
 pip install -e ".[nn,test]"        # torch is optional; only split.py needs it
 pytest -m "not slow"               # fast suite
-pytest -m slow                     # Monte Carlo checks (several minutes)
+pytest -m slow                     # Monte Carlo checks (about a minute)
 
 # pilot Monte Carlo and paper tables
 python scripts/run_montecarlo.py --all-scenarios --n 1000 5000 --lam 0.5 --reps 200 \
     --estimators ols oracle sp lewbel copula cumulant cumulant_aux --out results/fast
+python scripts/run_montecarlo.py --scenarios s1_latent_nongaussian s3_gaussian --n 1000 5000 10000 \
+    --lam 1.0 --reps 200 --estimators ols oracle cumulant --out results/lam1
 python scripts/run_montecarlo.py --scenarios s1_latent_nongaussian s3_gaussian aux_heteroskedastic \
-    --n 2000 --lam 0.5 --reps 30 --estimators ols cumulant neural_iv neural_cf --out results/nn
-python scripts/make_tables.py --fast results/fast/summary.csv --nn results/nn/summary.csv
+    --n 2000 --lam 0.5 --reps 25 --estimators ols cumulant neural_iv neural_cf --out results/nn
+python scripts/make_tables.py --fast results/fast/summary.csv --lam1 results/lam1/summary.csv \
+    --nn results/nn/summary.csv
 ```
 
 ## Main findings so far

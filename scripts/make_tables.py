@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Turn Monte Carlo summary CSVs into the LaTeX tables included by paper/main.tex.
 
-    python scripts/make_tables.py --fast results/fast/summary.csv --nn results/nn/summary.csv
+    python scripts/make_tables.py --fast results/fast/summary.csv [more.csv ...] \
+        --lam1 results/lam1/summary.csv --nn results/nn/summary.csv
+
+Later --fast files override earlier ones cell by cell (scenario, n, estimator).
 """
 
 import argparse
@@ -42,8 +45,9 @@ def table(rows, caption, label, estimators):
     ns = sorted({int(r["n"]) for r in rows})
     scen = [s for s in SCEN if any(r["scenario"] == s for r in rows)]
     reps = max(int(r["reps"]) for r in rows)
-    out = [r"\begin{table}[ht]", r"\centering", r"\scriptsize",
-           rf"\caption{{{caption} {reps} replications per cell; $\beta=1$.}}\label{{{label}}}",
+    out = [r"\begin{table}[p]" if len(rows) > 40 else r"\begin{table}[ht]", r"\centering", r"\scriptsize",
+           r"\setlength{\tabcolsep}{2.5pt}",
+           rf"\caption{{{caption} {reps} replications per cell; $\beta=1$; $\lambda$ as in the text unless fixed by the scenario.}}\label{{{label}}}",
            r"\begin{tabular}{@{}ll" + "rrrr" * len(ns) + "@{}}", r"\toprule"]
     out.append(" & " + " & ".join(rf"\multicolumn{{4}}{{c}}{{$n={n}$}}" for n in ns) + r" \\")
     out.append(" ".join(rf"\cmidrule(lr){{{3 + 4 * i}-{6 + 4 * i}}}" for i in range(len(ns))))
@@ -73,24 +77,28 @@ def table(rows, caption, label, estimators):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fast", required=True)
+    ap.add_argument("--fast", nargs="+", required=True)
+    ap.add_argument("--lam1", required=True)
     ap.add_argument("--nn", required=True)
     ap.add_argument("--out", default="paper/tables")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    note = ("Bias is the median bias; Cov.\\ is the coverage of the nominal 95\\% interval "
-            "(Wald with robust standard errors, percentile bootstrap for Cumulant-ICA); NI is the share "
-            "of replications in which the estimator reports that $\\beta$ is not identified "
-            "($D$ below the $\\chi^2_1$ 95\\% critical value; for the split also $F<10$ or an "
-            "unbounded Anderson--Rubin set).")
-    fast = read(a.fast)
+    merged = {}
+    for path in a.fast:
+        for r in read(path):
+            merged[(r["scenario"], r["n"], r["estimator"])] = r
+    fast = list(merged.values())
     est_fast = [e for e in LABELS if any(r["estimator"] == e for r in fast)]
-    (out / "pilot_fast.tex").write_text(table(fast, "Pilot Monte Carlo, closed-form estimators. " + note,
+    (out / "pilot_fast.tex").write_text(table(fast, "Pilot Monte Carlo, closed-form estimators. ",
                                               "tab:pilot-fast", est_fast))
+    lam1 = read(a.lam1)
+    est_l1 = [e for e in LABELS if any(r["estimator"] == e for r in lam1)]
+    (out / "pilot_lam1.tex").write_text(table(lam1, "Pilot Monte Carlo, S1 versus S3 with $\\lambda=1$. ",
+                                              "tab:pilot-lam1", est_l1))
     nn = read(a.nn)
     est_nn = [e for e in LABELS if any(r["estimator"] == e for r in nn)]
-    (out / "pilot_nn.tex").write_text(table(nn, "Pilot Monte Carlo, neural split (60 epochs). " + note,
+    (out / "pilot_nn.tex").write_text(table(nn, "Pilot Monte Carlo, neural split (60 epochs). ",
                                             "tab:pilot-nn", est_nn))
 
 

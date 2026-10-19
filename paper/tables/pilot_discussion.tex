@@ -1,1 +1,39 @@
-\textit{[pilot_discussion pending]}
+\paragraph{Reading the pilot.} Six patterns stand out.
+
+\emph{(i) The identification layer separates S1 from S3.} With $\lambda=1$
+(Table~\ref{tab:pilot-lam1}), Cumulant-ICA with labelling (L1) is essentially median-unbiased in S1.
+Its RMSE falls from $0.30$ at $n=1000$ to $0.07$ at $n=10000$, coverage is close to nominal, and the
+share of replications flagged as not identified falls from $64\%$ to $0\%$. In the Gaussian S3 the
+same estimator is erratic (RMSE in the units or larger), but $D$ flags $100\%$ of the replications.
+This is the first test of the research plan, and the layer passes it.
+
+\emph{(ii) Identification through higher moments is weak.} With $\lambda=0.5$
+(Table~\ref{tab:pilot-fast}), $\det M\propto\lambda^2$ is four times smaller. At $n=1000$ almost
+every S1 replication is flagged, and at $n=5000$ a third still are. This matches the sample sizes
+that \citet{delbianco2026} needs for power. Without the $D$ filter, the RMSE of Cumulant-ICA is
+dominated by a few explosive replications in which $\widehat{\det M}\approx0$.
+
+\emph{(iii) Labelling matters, and (L2) works only where its premise holds.} In the Aux design
+(L2) is median-unbiased with RMSE $0.10$ at $n=5000$. In S1, where $\Var(e_X\mid w_1)$ is constant,
+the auxiliary slope is uninformative, the rule picks the wrong root about half the time, and the
+median bias is close to that of OLS. Lewbel's estimator, which relies on the same
+heteroskedasticity, is excellent in the Aux design and uninformative elsewhere.
+
+\emph{(iv) Each competitor wins only in its own setting.} SP removes the bias almost completely in
+S2 (median bias $0.004$ at $n=5000$), where the confounding is a quadratic in $x$, and coincides
+with OLS whenever the confounding is linear. In S2 the ``oracle'' row is not a ceiling: there $e_X$
+is itself the confounded variable, which shows that an instrument is only valid relative to a
+model. The non-Gaussian estimators are misspecified in S2. $D$ flags about $90\%$ of replications,
+and the median bias of Cumulant-ICA there exceeds $1.6$ at $n=5000$. This calls for the agreement tests of
+Section~\ref{sec:tests} as a second line of defence.
+
+\emph{(v) Violations of independence (S4) bias every internal-instrument method,} including the
+oracle. Cumulant-ICA is mostly flagged. Across all replications its median bias is small for $\rho=0.3$ and
+about $0.28$ (against $0.40$ for OLS) when $e_X$ has a direct effect on $u$. This motivates the sensitivity analysis of
+\citet{conley2012}.
+
+\emph{(vi) The unanchored neural split does not identify $\beta$} (Table~\ref{tab:pilot-nn}). The IV
+version stays within $0.02$ of OLS in all three designs, and the control-function version is noisier
+without being better, as Proposition~\ref{prop:nosplit} predicts. Encouragingly, the procedure
+reports its own failure: $96$--$100\%$ of replications are flagged as not identified. The anchored
+split of Section~\ref{sec:anchored} is the natural next step.
