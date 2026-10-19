@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ivsplit"
+version = "0.1.0"
+description = "Synthetic instruments by adversarial splitting with identification through non-Gaussianity (Monte Carlo testbed)"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "scipy>=1.10", "scikit-learn>=1.2"]
+
+[project.optional-dependencies]
+nn = ["torch>=2.0"]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["slow: long-running Monte Carlo checks (deselect with -m 'not slow')"]

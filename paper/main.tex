@@ -1,0 +1,622 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{booktabs,tabularx,multirow}
+\usepackage{enumitem}
+\usepackage[authoryear,round]{natbib}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\newtheorem{assumption}{Assumption}
+\renewcommand{\theassumption}{H\arabic{assumption}}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\Corr}{\operatorname{Corr}}
+\newcommand{\cum}{\operatorname{cum}}
+\newcommand{\HSIC}{\operatorname{HSIC}}
+\newcommand{\indep}{\perp\!\!\!\perp}
+\newcommand{\xexo}{x_{\mathrm{exo}}}
+\newcommand{\tx}{\tilde{x}}
+\newcommand{\ty}{\tilde{y}}
+
+\title{Synthetic Instruments by Adversarial Splitting:\\
+Identification through Non-Gaussianity\thanks{Research proposal and Monte Carlo testbed.
+Code, tests and simulation scripts accompany this paper in the \texttt{ivsplit} package
+(\texttt{src/ivsplit}, \texttt{tests}, \texttt{scripts}). The literature search is not exhaustive.}}
+\author{Draft}
+\date{October 19, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We study the estimation of a linear structural coefficient when a regressor is endogenous and no
+credible external instrument is available. The idea is to split the endogenous regressor into an
+exogenous component and a remainder, $x = \xexo + r$ with $\xexo \indep u$, and to use $\xexo$ as an
+internally generated (``synthetic'') instrument or, equivalently, $r$ as a control function. We
+first explain why a naive version of this idea---generating many candidate instruments with a
+generative network trained to pass weak-instrument and over-identification tests---cannot work:
+exogeneity never enters a computable criterion. We then make the identifying assumption explicit:
+the regressor and the structural error are driven by mutually independent sources, at least two of
+which are non-Gaussian. Under this assumption the structural coefficient is identified from
+fourth-order cumulants up to a two-point set $\{\beta,\beta+\lambda\}$, a label ambiguity that is
+intrinsic to the model and that we resolve with a sign restriction or an auxiliary variable. The
+estimation layer is a neural network that learns the split under a Hilbert--Schmidt independence
+penalty, trained on one half of the sample, with estimation and weak-identification-robust
+inference on the other half. We also show that, in the over-complete linear model, the exogenous
+source is generally \emph{not} a measurable function of the data, so the network can only target
+moment validity rather than exact independence; a pilot simulation confirms that the unanchored
+split collapses towards OLS while the proposed diagnostics correctly report the failure. We
+propose a complete battery of pre-estimation, relevance, exogeneity and sensitivity tests, and a
+Monte Carlo design that pits the method against OLS, an oracle instrument, structural error
+projection, heteroskedasticity-based instruments, Gaussian-copula control functions and a linear
+cumulant (over-complete ICA) estimator.
+\end{abstract}
+
+\noindent\textbf{Keywords:} endogeneity, internal instruments, independent component analysis,
+higher-order cumulants, HSIC, control function, weak identification.
+
+\section{Introduction}\label{sec:intro}
+
+Consider the linear structural model
+\begin{equation}\label{eq:model}
+  y = x\beta + w'\delta + u, \qquad \E[xu]\neq 0,
+\end{equation}
+where $x$ is a scalar endogenous regressor, $w$ is a vector of exogenous covariates and $u$ is the
+structural error. The textbook solution is an external instrument: a variable that moves $x$ and is
+excluded from \eqref{eq:model}. When no such variable is credible, researchers turn to
+\emph{internal} instruments, built from the data at hand by exploiting heteroskedasticity
+\citep{rigobon2003,lewbel2012}, higher moments \citep{lewbel1997,erickson2002}, latent discrete
+structure \citep{ebbes2005}, distributional assumptions \citep{parkgupta2012} or functional form
+\citep{dong2026sp}.
+
+This paper develops a variant of that programme. We seek a decomposition
+\begin{equation}\label{eq:split}
+  x = \xexo + r, \qquad \xexo \indep u,
+\end{equation}
+and use $\xexo$ as the source of exogenous variation. Two ingredients define the proposal:
+\begin{enumerate}[label=(\roman*)]
+  \item \textbf{Identification} comes from mutually independent, non-Gaussian sources of variation,
+  as in independent component analysis \citep[ICA;][]{comon1994} and its causal counterparts with
+  latent variables \citep{hoyer2008,salehkaleybar2020,wang2023,tramontano2025}.
+  \item \textbf{Estimation} uses a neural network that learns the split, with independence enforced
+  by a Hilbert--Schmidt independence criterion \citep[HSIC;][]{gretton2005,gretton2008} in the
+  spirit of HSIC-X \citep{saengkyongam2022}, and with sample splitting so that inference does not
+  reuse the data that shaped the instrument.
+\end{enumerate}
+
+Our contributions are fourfold. First, we state precisely what has to be assumed: any synthetic
+instrument replaces the exclusion restriction of an external instrument with another untestable
+hypothesis, here independence of latent sources (Section~\ref{sec:why}). Second, we give a
+self-contained identification result for the canonical latent-confounder model, which shows that
+the coefficient is identified from fourth-order cumulants only up to the set $\{\beta,\beta+\lambda\}$
+and that this ambiguity is a genuine observational equivalence, not an artefact of the estimator
+(Section~\ref{sec:identification}). Third, we show that the exogenous source is generally not a
+measurable function of observables in this over-complete setting, which sharpens what a network can
+and cannot learn and motivates an anchored version of the estimator (Section~\ref{sec:network}).
+Fourth, we provide a complete testing battery and a Monte Carlo design, with an open-source
+implementation and unit tests (Sections~\ref{sec:tests}--\ref{sec:mc}).
+
+\section{Why the naive synthetic-instrument idea fails}\label{sec:why}
+
+The first version of this project generated $2k$ candidate instruments with a generative
+adversarial network trained to pass weak-instrument and Sargan tests, and filtered the excess with
+Hausman tests. The design fails for reasons that are worth recording because they constrain every
+variant of the idea.
+
+\begin{enumerate}[label=\arabic*.]
+  \item \emph{Exogeneity is not in the objective.} The condition $\Cov(z,u)=0$ involves the
+  unobserved $u$ and appears in no computable criterion. A search over candidates converges to
+  \emph{strong} instruments, not to \emph{valid} ones.
+  \item \emph{Passing an over-identification test is necessary, not sufficient.} Instruments
+  manufactured from the same data inherit the same contamination and agree with each other on the
+  same wrong value; the Sargan--Hansen test \citep{sargan1958,hansen1982} has no power against a
+  common bias.
+  \item \emph{Training to pass a test is selection on the test outcome.} It produces pre-test bias,
+  a winner's curse and a severe multiple-testing problem across $2k$ candidates.
+  \item \emph{The Hausman test answers a different question.} \citet{hausman1978} compares OLS with
+  IV and tests the endogeneity of the regressor. Testing a subset of instruments calls for the
+  difference-in-Hansen (C) statistic \citep{eichenbaum1988}.
+  \item \emph{No algorithm creates identification.} If the data contain no source of exogenous
+  variation, no transformation of them will. Every synthetic instrument trades the exclusion
+  restriction of an external instrument for another untestable hypothesis.
+\end{enumerate}
+
+The question therefore becomes: \emph{which identifying hypothesis is the researcher willing to
+maintain in order to perform the split \eqref{eq:split}?} We answer it with independence and
+non-Gaussianity of latent sources.
+
+\section{Model and identification}\label{sec:identification}
+
+\subsection{The canonical latent-confounder model}
+
+Let $\tx = x - \E[x\mid w]$ and $\ty = y - \E[y\mid w]$ denote the regressor and outcome after
+partialling out the exogenous covariates. Our leading structure is
+\begin{equation}\label{eq:canonical}
+  x = g(w) + H + e_X, \qquad u = \lambda H + e_Y, \qquad y = \beta x + w'\delta + u,
+\end{equation}
+so that $\tx = H + e_X$ and $\ty = \beta\tx + u = (\beta+\lambda)H + \beta e_X + e_Y$. Here $H$ is a
+latent confounder, $e_X$ is the exogenous variation in $x$ that we wish to recover, and $e_Y$ is
+idiosyncratic outcome noise. All three are mean zero and independent of $w$.
+
+\subsection{Assumptions}
+
+\begin{assumption}[Independent sources]\label{ass:indep}
+$H$, $e_X$ and $e_Y$ are mutually independent and independent of $w$.
+\end{assumption}
+
+\begin{assumption}[Non-Gaussianity]\label{ass:nongauss}
+The fourth cumulants $\kappa_H = \cum_4(H)$ and $\kappa_X = \cum_4(e_X)$ are non-zero.
+\end{assumption}
+
+\begin{assumption}[Class restriction]\label{ass:class}
+The map from sources to observables belongs to a class for which the independent decomposition is
+unique up to the symmetries made explicit below: linear mixing after partialling out $w$ as in
+\eqref{eq:canonical}, or a non-linear class made identifiable by additive noise, sparsity of the
+mixing map or an observed auxiliary variable
+\citep{hyvarinen2019,khemakhem2020,zheng2022}.
+\end{assumption}
+
+\begin{assumption}[Relevance]\label{ass:relevance}
+The exogenous component has non-zero variance and is correlated with $x$: $\Var(e_X)>0$.
+\end{assumption}
+
+\begin{assumption}[Labelling]\label{ass:label}
+One of the following holds.
+\textbf{(L1)} The sign of the confounding, $\operatorname{sign}(\lambda)$, is known.
+\textbf{(L2)} There is an auxiliary variable $a$ (a component of $w$ or an additional observable)
+such that the law of $H$ does not depend on $a$ while $\Var(e_X\mid a)$ does.
+\end{assumption}
+
+Assumption~\ref{ass:indep} is a disguised exclusion restriction and cannot be tested.
+Assumption~\ref{ass:nongauss} is checkable. Assumption~\ref{ass:class} is necessary because
+non-linear ICA is not identifiable in general \citep{hyvarinen1999}. Assumption~\ref{ass:label} is
+needed because of the symmetry established next.
+
+\subsection{Identification up to a two-point set}
+
+Write $c_{4-k,k} = \cum(\underbrace{\tx,\dots,\tx}_{4-k},\underbrace{\ty,\dots,\ty}_{k})$ for the joint
+fourth-order cumulants, and abbreviate $c_k \equiv c_{4-k,k}$. By multilinearity of cumulants and
+independence of the sources,
+\begin{equation}\label{eq:cumulants}
+  c_k = \kappa_H (\beta+\lambda)^k + \kappa_X \beta^k + \kappa_Y\,\mathbf{1}\{k=4\}, \qquad k=0,\dots,4.
+\end{equation}
+For $k\le 3$ this is a two-term exponential sum in the unknown slopes $s_H=\beta+\lambda$ and
+$s_X=\beta$, so it satisfies the linear recursion of Prony's method:
+\begin{equation}\label{eq:prony}
+  c_{k+2} = p\,c_{k+1} + q\,c_k,\quad k=0,1, \qquad p = s_H + s_X,\; q = -s_H s_X.
+\end{equation}
+
+\begin{proposition}[Identification up to labels]\label{prop:twopoint}
+Under Assumptions~\ref{ass:indep}--\ref{ass:nongauss} in model \eqref{eq:canonical} with
+$\lambda\neq0$:
+\begin{enumerate}[label=(\alph*)]
+  \item The matrix $M = \begin{pmatrix} c_{1} & c_{0}\\ c_{2} & c_{1}\end{pmatrix}$ has
+  $\det M = -\kappa_H\kappa_X\lambda^2 \neq 0$, so $(p,q)$ is identified from
+  $M(p,q)' = (c_2,c_3)'$, and the set $\{\beta,\beta+\lambda\}$ is identified as the roots of
+  $t^2 - pt - q = 0$.
+  \item The set is sharp: the model with parameters $(\beta',\lambda') = (\beta+\lambda,-\lambda)$ and
+  sources $(H',e_X') = (e_X,H)$ generates exactly the same distribution of $(\tx,\ty)$.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+(a) Substituting \eqref{eq:cumulants},
+$\det M = (\kappa_H s_H + \kappa_X s_X)^2 - (\kappa_H s_H^2 + \kappa_X s_X^2)(\kappa_H + \kappa_X)
+= -\kappa_H\kappa_X (s_H - s_X)^2 = -\kappa_H\kappa_X\lambda^2$. The recursion \eqref{eq:prony}
+follows from $s_j^{k+2} = p s_j^{k+1} + q s_j^{k}$ for $j\in\{H,X\}$, which holds because each $s_j$
+solves $t^2 - pt - q = 0$. (b) Under the alternative parameters,
+$\tx = H' + e_X' = e_X + H$ and $\ty = (\beta'+\lambda')H' + \beta' e_X' + e_Y
+= \beta e_X + (\beta+\lambda)H + e_Y$, which coincide with the original variables.
+\end{proof}
+
+\begin{remark}
+Part (b) is the population version of the ``identified only up to two points'' result of
+\citet{delbianco2026} and of the label ambiguity in latent-variable LiNGAM
+\citep{hoyer2008,tramontano2025}. It is not a weakness of any particular estimator: without
+Assumption~\ref{ass:label} \emph{no} procedure can tell the confounder from the exogenous source,
+because both enter $x$ with unit loading.
+\end{remark}
+
+\begin{proposition}[Labelling]\label{prop:label}
+Under the conditions of Proposition~\ref{prop:twopoint}: (L1) if $\lambda>0$ then $\beta$ is the
+smaller root, and if $\lambda<0$ the larger; (L2) $\beta$ equals the slope of
+$\Cov(\tx,\ty\mid a)$ on $\Var(\tx\mid a)$ across values of $a$.
+\end{proposition}
+
+\begin{proof}
+(L1) is immediate. For (L2), $\Var(\tx\mid a) = \sigma_H^2 + \sigma_X^2(a)$ and
+$\Cov(\tx,\ty\mid a) = (\beta+\lambda)\sigma_H^2 + \beta\sigma_X^2(a)$, so the two conditional moments
+are affine in $\sigma_X^2(a)$ with slope ratio $\beta$.
+\end{proof}
+
+\begin{remark}
+Under (L2) the second-moment argument alone identifies $\beta$, without any appeal to
+non-Gaussianity; it is identification through heteroskedasticity
+\citep{rigobon2003,lewbel2012}. In our framework (L2) is used only to \emph{pick} one of the two
+roots, which needs far less than consistent estimation of the slope; the cumulant equations then
+provide an over-identifying check.
+\end{remark}
+
+\begin{proposition}[Gaussian non-identification]\label{prop:gauss}
+If $H$, $e_X$ and $e_Y$ are Gaussian, $\beta$ is not identified: the distribution of $(\tx,\ty)$
+depends on the five parameters $(\beta,\lambda,\sigma_H^2,\sigma_X^2,\sigma_Y^2)$ only through the
+three moments $\Var(\tx)$, $\Cov(\tx,\ty)$ and $\Var(\ty)$, and every $\beta'$ in a non-degenerate
+interval containing $\beta$ is observationally equivalent.
+\end{proposition}
+
+\begin{proof}
+Gaussian vectors are characterised by their covariance. Fix $\beta'$ near $\beta$ and keep
+$\sigma_H'^2 = \sigma_H^2$, $\sigma_X'^2=\sigma_X^2$. Choose $\lambda'$ so that
+$\Cov(\tx,\ty) = \beta'\Var(\tx) + \lambda'\sigma_H^2$ and $\sigma_Y'^2$ so that $\Var(\ty)$ is
+matched; by continuity $\sigma_Y'^2>0$ for $\beta'$ close enough to $\beta$.
+\end{proof}
+
+Proposition~\ref{prop:gauss} is the population reason why scenario~3 of the Monte Carlo is a
+negative control: an honest procedure must report weak or failed identification there, rather than
+a confident estimate. It also explains why the identification-strength statistic of
+Section~\ref{sec:diagnostic} is built on $\det M$.
+
+\subsection{An identification-strength diagnostic}\label{sec:diagnostic}
+
+Proposition~\ref{prop:twopoint} shows that identification hinges on $\det M = -\kappa_H\kappa_X
+\lambda^2$, which vanishes when either source is mesokurtic (e.g.\ Gaussian) or when there is no
+confounding. We report
+\begin{equation}\label{eq:D}
+  D = \frac{\widehat{\det M}^{\,2}}{\widehat{\Var}_{\mathrm{boot}}\big(\widehat{\det M}\big)},
+\end{equation}
+a Wald statistic for $H_0:\det M = 0$, with a nonparametric bootstrap variance. Small values of $D$
+(below the $\chi^2_1$ critical value) indicate that the higher-order information is insufficient to
+separate the sources, in the spirit of the $D$ diagnostic of \citet{delbianco2026}. When $\lambda=0$
+a small $D$ is benign---OLS is then consistent---and should be read together with a Hausman test.
+
+\subsection{The linear identification layer as an estimator}
+
+Replacing population cumulants by sample cumulants of the $w$-residualised data, solving the
+(possibly over-identified, if third-order cumulants are added) linear system for $(\hat p,\hat q)$ and
+labelling the roots with (L1) or (L2) gives a simple closed-form estimator, which we call
+\emph{Cumulant-ICA}. It is the over-complete ($2\times3$) ICA estimator of the canonical model and
+is closely related to the higher-moment estimators of \citet{lewbel1997} and \citet{erickson2002}.
+We use it both as a competitor and as an anchor for the network (Section~\ref{sec:anchored}).
+
+\section{The neural split}\label{sec:network}
+
+\subsection{Procedure}
+
+\begin{enumerate}[label=\textbf{Step \arabic*.},leftmargin=*]
+  \item \textbf{Sample splitting.} Randomly split the sample into halves $A$ and $B$. All learning
+  happens on $A$; $\hat\beta$, standard errors and every test are computed on $B$.
+  \item \textbf{Partialling out.} Compute $\tx,\ty$ by regressing $x,y$ on $w$ (linearly, with a
+  sieve, or with cross-fitted machine learning as in \citealp{chernozhukov2018}).
+  \item \textbf{Training.} A network $f_\theta$ maps $(\tx, w)$ to $\xexo$ and sets
+  $r = \tx - \xexo$. The parameters minimise
+  \begin{equation}\label{eq:loss}
+  \mathcal{L}(\theta,\beta) = \alpha\,\HSIC(\xexo, r)
+     + \gamma\,\HSIC(\ty - \beta\tx,\, \xexo)
+     + \eta\,\big[(c_{\min} - \rho^2)_+ + (\rho^2 - c_{\max})_+\big],
+  \end{equation}
+  where $\rho = \Corr(\xexo,\tx)$. The first term imposes independence between the two parts of the
+  split; the second is the HSIC-X criterion of \citet{saengkyongam2022} with the learned
+  instrument; the third is a relevance band that rules out degenerate solutions. The
+  reconstruction term $\|x - \xexo - r\|^2$ of the original proposal vanishes by construction.
+  $\beta$ is updated in alternation by the IV formula
+  $\beta \leftarrow \sum \xexo\ty / \sum\xexo\tx$.
+  \item \textbf{Estimation.} On $B$, compute $\xexo$ and $r$ and estimate $\beta$ by 2SLS with
+  $\xexo$ as the excluded instrument (``split-IV''), or by OLS of $y$ on $(x,w,r)$ (``split-CF'').
+  \item \textbf{Inference.} Report heteroskedasticity-robust standard errors, the robust
+  first-stage $F$ \citep{montielolea2013}, and the Anderson--Rubin confidence set
+  \citep{andersonrubin1949}, which remains valid when the learned instrument is weak.
+  \item \textbf{Diagnostics.} Report $D$ from \eqref{eq:D} on $B$ next to $\hat\beta$, and the
+  battery of Section~\ref{sec:tests}.
+\end{enumerate}
+
+\subsection{Degenerate solutions}
+
+Three degenerate solutions must be excluded. (i) $\xexo\approx$ constant is independent of
+everything but irrelevant; the relevance floor $c_{\min}$ excludes it. (ii) $\xexo = \tx$ has
+maximal relevance and, with $r\equiv 0$, trivially satisfies $\HSIC(\xexo,r)=0$, but the IV estimator
+collapses to OLS; the relevance cap $c_{\max}<1$ excludes it. (iii) Over-fitting on the training
+sample inflates the first-stage $F$ and recreates the many-instruments bias; sample splitting
+neutralises it.
+
+\subsection{What the network can and cannot recover}\label{sec:cannot}
+
+A natural reading of \eqref{eq:split} is that the network should output $\xexo = e_X$. The next
+result shows that this is generally impossible in the over-complete model, where three sources
+drive two observables.
+
+\begin{proposition}[No measurable exact split]\label{prop:nosplit}
+In model \eqref{eq:canonical} under Assumption~\ref{ass:indep}, suppose $\lambda\neq0$, the
+characteristic function of $e_Y$ has no real zeros, $H$ has support $\mathbb{R}$, and the
+characteristic function of $e_X$ has no real zeros. Then every measurable $f$ with
+$f(\tx)\indep u$ is almost surely constant.
+\end{proposition}
+
+\begin{proof}[Proof sketch]
+Since $e_Y$ is independent of $(H,e_X)$ and its characteristic function does not vanish,
+$f(\tx)\indep \lambda H + e_Y$ implies $f(\tx)\indep H$ by deconvolution of the joint characteristic
+function. For any Borel set $A$, independence then requires
+$\Pr(H+e_X\in A\mid H=h)=\int \mathbf{1}_A(h+t)\,dF_{e_X}(t)$ to be constant in $h$ on the support
+of $H$, i.e.\ the convolution of $\mathbf{1}_A$ with the law of $-e_X$ is constant on $\mathbb{R}$.
+Taking Fourier transforms and using that the characteristic function of $e_X$ has no zeros, by
+Wiener's Tauberian theorem $\mathbf{1}_A$ is a.e.\ constant, so the $\sigma$-field generated by
+$f(\tx)$ is trivial.
+\end{proof}
+
+Laplace, Gaussian and centred exponential laws all satisfy the conditions, and adding $w$ to the
+inputs does not help when $w$ is independent of the sources. Two consequences follow.
+
+\begin{itemize}
+  \item The population objective \eqref{eq:loss} cannot be driven to zero, and its minimiser in
+  $(\theta,\beta)$ need not be at the true $\beta$. In particular, at the OLS slope the residual
+  $\ty - \beta_{\mathrm{OLS}}\tx$ is uncorrelated with $\tx$, so the HSIC-X term only penalises
+  higher-order dependence, which is weak in moderate samples. Our pilot simulations
+  (Section~\ref{sec:pilot}) confirm that the unanchored split converges near OLS.
+  \item What \emph{is} attainable is \emph{moment} validity. Writing $m(\tx)=\E[H\mid\tx]$, any
+  function $f$ with $\E[f(\tx)m(\tx)]=0$ and $\E[f(\tx)\tx]\ne0$ is a valid and relevant instrument,
+  since $\E[f(\tx)u] = \lambda\E[f(\tx)m(\tx)]$. Such functions exist in abundance (they form a
+  subspace of codimension one), but selecting one requires knowledge of $m$, which in turn depends on
+  the laws of $H$ and $e_X$---exactly what the cumulant layer identifies up to labels.
+\end{itemize}
+
+There are also non-generic cases in which an exact split exists, for example when $H$ is discrete
+and $e_X$ has bounded support with non-overlapping translates; such structures are the province of
+latent-mixture approaches \citep{ebbes2005}.
+
+\subsection{Anchored split}\label{sec:anchored}
+
+Proposition~\ref{prop:nosplit} motivates a revised estimation layer that lets the identification
+layer do the identifying and the network do the approximating:
+\begin{enumerate}[label=(\roman*)]
+  \item On sample $A$, estimate $\beta$ (and, if desired, the source laws) with the cumulant
+  layer and label the roots with (L1) or (L2), obtaining $\hat\beta_A$.
+  \item Train $f_\theta$ on $A$ with $\beta$ fixed at $\hat\beta_A$ in the HSIC-X term, so that the
+  network searches for instrument functions $f(\tx,w)$ whose implied moment conditions are
+  approximately satisfied at the identified value, and use the relevance band to keep them
+  informative.
+  \item On $B$, estimate $\beta$ by 2SLS with the learned functions and test the over-identifying
+  restrictions they imply.
+\end{enumerate}
+The non-linear value of the network lies where the linear layer is silent: a non-linear
+first stage $g(w)$, auxiliary variables that modulate the law of $e_X$ (Assumption~\ref{ass:class}),
+and efficient combination of moment conditions. Whether the anchored split improves on the plain
+cumulant estimator in finite samples is an empirical question that the Monte Carlo is designed to
+answer.
+
+\section{Testing battery}\label{sec:tests}
+
+All tests are computed on the estimation half $B$. Table~\ref{tab:tests} summarises them.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Tests applied before and after estimation.}\label{tab:tests}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{6.2cm} X@{}}
+\toprule
+Test & What it checks \\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Pre-estimation (identification conditions)}}\\
+Skewness, kurtosis, Jarque--Bera \citep{jarquebera1987} & Assumption~\ref{ass:nongauss}, on $\tx$ and on OLS residuals \\
+Identification strength $D$, eq.~\eqref{eq:D} & Whether the higher-order information separates the sources \\
+Breusch--Pagan / White \citep{breusch1979,white1980} & Heteroskedasticity, needed for the Lewbel competitor and for (L2) \\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Relevance}}\\
+Robust first-stage $F$ / Kleibergen--Paap \citep{montielolea2013,kleibergen2006} & Strength of $\xexo$; computed on $B$ only \\
+Anderson--Rubin set \citep{andersonrubin1949} & Weak-instrument-robust inference on $\beta$ \\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Exogeneity of $\xexo$ (the critical point)}}\\
+HSIC / distance covariance of $\xexo$ and $\hat\varepsilon$ \citep{gretton2008,szekely2007} & Dependence beyond correlation (which is zero by construction) \\
+Hansen $J$ with $f_1(\xexo),f_2(\xexo),\dots$ \citep{hansen1982} & Contaminated instruments imply different $\beta$s across functions \\
+C test \citep{eichenbaum1988} & Validity of a subset of instruments \\
+Agreement between strategies & Hausman-type contrast with Lewbel, SP, copula, Cumulant-ICA \\
+Hausman, OLS vs IV \citep{hausman1978} & Is there endogeneity to correct? \\
+Negative-control outcomes & Zero effect on an outcome $x$ cannot affect \\
+$\HSIC(\xexo,r)$ & Independence of the split (necessary only) \\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Sensitivity}}\\
+\citet{conley2012}; \citet{nevo2012} & Range of $\hat\beta$ if $\Cov(\xexo,u)\ne0$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Exogeneity cannot be tested directly.} Because $u$ is unobserved, every exogeneity test
+uses the estimated residual $\hat\varepsilon = y - x\hat\beta - w'\hat\delta$ with $\hat\beta$
+computed from $\xexo$ itself. The linear correlation between $\xexo$ and $\hat\varepsilon$ is
+therefore zero by construction and only non-linear dependence is informative. Since $\hat\beta$ is
+estimated, permutation or naive bootstrap calibration is only approximate; a bootstrap that
+re-estimates $\beta$ in each draw is preferable.
+
+\paragraph{Over-identification with functions of the instrument.} If $\xexo$ is contaminated, the
+moment conditions $\E[f_j(\xexo)(y-x\beta-w'\delta)]=0$ generally imply different values of $\beta$
+for different $f_j$, and Hansen's $J$ rejects. Two blind spots deserve emphasis, both confirmed by
+the accompanying unit tests: under Gaussianity $\E[u\mid\xexo]$ is linear and all $f_j$ imply the
+same wrong $\beta$; and if $H$ and $e_X$ are \emph{exchangeable} (identically distributed), then
+$\E[H\mid H+e_X] = (H+e_X)/2$ is again linear and the test has no power against the fully
+contaminated instrument $\tx$. The test has power when the conditional expectation of the
+confounder given the instrument is non-linear.
+
+\paragraph{Procedural safeguards.}
+\begin{itemize}
+  \item \emph{Circularity.} If the network minimised $\HSIC(\hat\varepsilon,\xexo)$, testing the same
+  quantity on the same data tests what was optimised. Train on $A$, test on $B$.
+  \item \emph{Gaussianity.} Under normality, independence reduces to zero correlation, which holds
+  by construction, and every independence test passes vacuously. Always report the
+  non-Gaussianity diagnostics alongside.
+  \item \emph{Multiple testing.} When several exogeneity tests are reported, adjust with
+  Bonferroni or \citet{holm1979}.
+  \item \emph{Post-selection inference.} Hyper-parameters and architecture choices informed by test
+  outcomes must be made on $A$.
+\end{itemize}
+
+\section{Related literature}\label{sec:lit}
+
+Table~\ref{tab:lit} positions the proposal. Two strands are closest. \citet{dong2026sp} also split
+$x$ without an external instrument, constructing $z = x - P_S x$ by projecting $x$ on a sieve
+approximation of the confounding $\E[\varepsilon\mid x]$; identification there comes from functional
+form (the confounding has no linear part in $x$), which fails under joint normality and does not
+cover linear confounding. \citet{delbianco2026} tests the exclusion restriction of a single
+instrument with fourth-order cumulants under a latent non-Gaussian factor, an over-complete
+$2\times3$ ICA problem; the direct effect is identified only up to two points, which is the
+counterpart of our Proposition~\ref{prop:twopoint}(b), and power requires substantial kurtosis and
+$n$ in the low thousands.
+
+\begin{table}[ht]
+\centering
+\small
+\caption{Position in the literature.}\label{tab:lit}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.6cm} X X@{}}
+\toprule
+Work & What it does & Relation to this proposal \\
+\midrule
+\citet{dong2026sp} & Internal instrument $z = x - P_Sx$; identification by functional form; LASSO over a basis; non-parametric Hausman-type test & Splits $x$ without IV; different identification; no networks; fails under joint normality and linear confounding \\
+\citet{delbianco2026} & Tests exclusion with one instrument via fourth-order cumulants; over-complete ICA; effect identified up to two points & Shows $e_X$ identifiable under latent confounding; needs $Z$, linear, power only with kurtosis and large $n$; provides a $D$ diagnostic \\
+\citet{tramontano2025} & Causal effects in lvLiNGAM from higher-order cumulants with one proxy or instrument & Close neighbour of the identification layer \\
+\citet{hoyer2008,salehkaleybar2020,wang2023,silva2017} & LiNGAM with latent variables; search for valid instruments under non-Gaussianity & Main risk to the novelty of the identification layer \\
+\citet{saengkyongam2022} & HSIC-X: minimise HSIC between residuals and instruments & Source of the independence loss; still requires instruments \\
+\citet{hyvarinen2019,khemakhem2020,zheng2022} & Identifiable non-linear ICA with auxiliary variables or sparsity & Conditions to make a non-linear split identifiable \\
+\citet{lewbel1997,erickson2002} & Higher-moment instruments for mismeasured regressors & Ancestors of the cumulant layer \\
+\citet{lewbel2012,parkgupta2012,ebbes2005,rigobon2003} & Internal instruments via heteroskedasticity, copulas, latent mixtures, regimes & Competitors and robustness checks \\
+\citet{conley2012,nevo2012} & Inference with imperfect exogeneity & Sensitivity analysis \\
+\citet{hartford2017,bennett2019} & Deep IV and deep GMM & Neural IV estimators that assume an external instrument \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Apparent gap.} A non-linear split of the endogenous regressor, learned by adversarial or
+HSIC independence, identified by non-Gaussianity, and used as an instrument or control function
+with valid inference. The linear identification layer exists already; the defensible contribution
+is the non-linear estimation layer with inference and Monte Carlo evidence. Referees will likely
+describe the method as ``over-complete ICA by another name''; Proposition~\ref{prop:nosplit} and the
+anchored split are our answer to what the network adds.
+
+\section{Monte Carlo design}\label{sec:mc}
+
+\subsection{Base DGP}
+
+The base design is \eqref{eq:canonical} with $w\sim N(0,I_2)$, $\delta = (0.5,0.5)'$, $\beta=1$, unit
+variances for all sources, and $g$ either linear or non-linear (softplus and sine terms). Sources are
+drawn from Laplace (excess kurtosis $3$), centred exponential (skewness $2$), a symmetric bimodal
+mixture (negative excess kurtosis), uniform, or Gaussian (negative control).
+
+\subsection{Scenarios}
+
+\begin{enumerate}[label=S\arabic*.]
+  \item \emph{Non-Gaussian latent factor} (Delbianco's home turf): identification should work.
+  Variants with linear and non-linear $g$.
+  \item \emph{Non-linear confounding without a linear part} (SP's home turf):
+  $x = g(w) + v$, $u = \lambda(v^2 - \E v^2) + e_Y$ with skewed $v$, so OLS is biased while the
+  confounding is a quadratic function of $x$. SP should win; the proposal should at least not
+  lose badly, and its diagnostics should flag the misspecification.
+  \item \emph{Gaussian sources} (negative control): no non-Gaussian method identifies $\beta$; the
+  procedure must report weak identification rather than a confident $\hat\beta$.
+  \item \emph{Violated independence}: correlation $\rho$ between $H$ and $e_X$, or a direct channel
+  $u \mathrel{+}= \delta_{\mathrm{excl}} e_X$. Measures bias as the hypothesis breaks.
+  \item \emph{Placebo and size}: $\lambda=0$ (exogenous $x$) and pure-noise candidate instruments.
+  The procedure must not invent exogenous variation nor ``pass'' tests with garbage.
+  \item[Aux.] \emph{Auxiliary heteroskedasticity}: $\Var(e_X\mid w_1)$ varies with $w_1$, which
+  enables labelling (L2) and gives the Lewbel competitor its best case.
+\end{enumerate}
+
+\subsection{Grid, estimators and metrics}
+
+The full grid uses $n\in\{500,1000,2000,5000,10000\}$, $\lambda\in\{0.2,0.5,1\}$ and 500--1000
+replications per cell. Estimators: OLS; 2SLS with the planted exogenous variation $e_X$ as an
+oracle instrument (performance ceiling); SP (sieve + LASSO); Lewbel; Gaussian-copula control
+function; Cumulant-ICA with labelling (L1) and (L2); and the neural split (IV and control-function
+versions). Delbianco's test is run only in an auxiliary design with a planted instrument. Metrics:
+bias, median bias and RMSE of $\hat\beta$; coverage of nominal 95\% intervals (Wald, bootstrap or
+Anderson--Rubin); size and power of each test of Section~\ref{sec:tests} against planted violations;
+and the share of replications in which the method declares that $\beta$ is not identified.
+
+\subsection{Pilot results}\label{sec:pilot}
+
+Tables~\ref{tab:pilot-fast} and~\ref{tab:pilot-nn} report a small pilot run
+($\lambda = 0.5$, labelling (L1) with $\lambda>0$ known) produced by
+\texttt{scripts/run\_montecarlo.py}; the full grid is left for the next stage.
+
+\input{tables/pilot_fast.tex}
+
+\input{tables/pilot_nn.tex}
+
+\input{tables/pilot_discussion.tex}
+
+\section{Risks and limitations}\label{sec:risks}
+
+\begin{itemize}
+  \item Assumption~\ref{ass:indep} is equivalent to a disguised exclusion restriction and is not
+  testable. The paper must say so plainly, and results should always be accompanied by sensitivity
+  analysis and by at least one alternative identification strategy.
+  \item Identification through higher-order moments is weak: it requires non-trivial kurtosis (or
+  skewness) and large samples; $D$ makes this visible but does not cure it.
+  \item The label ambiguity of Proposition~\ref{prop:twopoint}(b) is intrinsic. Assumption~\ref{ass:label}
+  is an additional, substantive input.
+  \item Over-complete non-linear ICA is less identifiable than its linear counterpart; without a
+  class restriction the split is arbitrary. Proposition~\ref{prop:nosplit} shows that even in the
+  linear case the exogenous source is not a function of the data.
+  \item Novelty risk: the identification layer already exists in the latent-variable LiNGAM
+  literature; the contribution must lie in non-linear estimation, inference and simulation evidence.
+\end{itemize}
+
+\section{Next steps}
+
+\begin{enumerate}
+  \item Run scenarios S1 and S3 first: if the method cannot separate the identifiable case from the
+  Gaussian one, nothing else matters. The pilot shows that the cumulant layer and the diagnostic $D$
+  pass this test, while the unanchored network does not improve on OLS.
+  \item Implement and evaluate the anchored split of Section~\ref{sec:anchored}.
+  \item Replace permutation calibration of the residual-independence tests with a bootstrap that
+  re-estimates $\beta$.
+  \item Read \citet{hoyer2008}, \citet{silva2017} and \citet{tramontano2025} closely to settle the
+  novelty question.
+\end{enumerate}
+
+\appendix
+\section{Implementation and tests}\label{app:code}
+
+The accompanying Python package \texttt{ivsplit} implements every component of the paper:
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+Module & Content \\
+\midrule
+\texttt{dgp.py} & Source distributions, DGP \eqref{eq:canonical}, scenarios S1--S5 and Aux \\
+\texttt{estimators.py} & OLS, 2SLS (robust), oracle, Lewbel, copula CF, SP, joint cumulants, Prony roots, labelling, Cumulant-ICA \\
+\texttt{independence.py} & HSIC, distance covariance, permutation tests \\
+\texttt{split.py} & Neural split, loss \eqref{eq:loss}, sample-split estimation and inference \\
+\texttt{diagnostics.py} & The battery of Table~\ref{tab:tests}, Conley et al.\ bounds, Holm/Bonferroni \\
+\texttt{montecarlo.py} & Grid runner and summary metrics \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The test suite (\texttt{pytest}) checks, among other things: that sources are standardised and have
+the intended skewness and kurtosis; that the oracle 2SLS is consistent while OLS converges to
+$\beta + \lambda\sigma_H^2/(\sigma_H^2+\sigma_X^2)$; that the Prony roots recover $\{\beta,\beta+\lambda\}$
+and flipping the sign restriction returns $\beta+\lambda$; that $D$ is large under non-Gaussian
+confounding and small under Gaussian sources or no confounding; that SP wins in S2 and fails under
+linear confounding; that the over-identification test with powers of the instrument detects
+contamination when $\E[H\mid\tx]$ is non-linear and is blind when the sources are Gaussian or
+exchangeable; that HSIC and distance covariance detect non-linear dependence and have correct size;
+and that the neural split respects the relevance band, uses disjoint halves, and reports failed
+identification under Gaussian sources.
+
+\begingroup\sloppy
+\bibliographystyle{plainnat}
+\bibliography{references}
+\endgroup
+
+\end{document}
