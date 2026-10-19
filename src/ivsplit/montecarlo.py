@@ -83,10 +83,12 @@ ESTIMATORS: dict[str, EstimatorFn] = {
     "gan_ctest": _gan(filter="ctest"),
     "gan_split": _gan(filter="hausman", sample_split=True),
     "gan_partialled": _gan(filter="hausman", sargan_eq="partialled"),
+    "gan_hsic_eval": _gan(filter="hausman", hsic="eval"),
+    "gan_hsic_train": _gan(filter="hausman", hsic="train"),
 }
 
 # Extra per-replication diagnostics carried into the records when an estimator reports them.
-EXTRA_FIELDS = ("F", "sargan_p", "n_kept", "corr_u")
+EXTRA_FIELDS = ("F", "sargan_p", "n_kept", "corr_u", "hsic_reject")
 
 FAST_ESTIMATORS = ["ols", "oracle", "sp", "lewbel", "copula", "cumulant"]
 

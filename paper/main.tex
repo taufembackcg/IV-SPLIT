@@ -217,6 +217,22 @@ estimate is $\hat\beta_K$, and the procedure declares success if
 $\bigcap_j\{F_j^{\mathrm{rob}}>10\}\cap\{S_j\text{ not rejected}\}$ on the final $K_j$ (a single
 remaining candidate leaves $S_j$ undefined, which counts as not rejected).
 
+\paragraph{HSIC variant.} Overidentification tests only use $\E[\tilde z\varepsilon]=0$. A stronger
+null is full independence, $\tilde Z_K\indep u$. On the held-out half we compute
+\begin{equation}\label{eq:gan-hsic}
+  \widehat{\HSIC}\big(\tilde Z_K,\hat\varepsilon\big) = \frac{1}{n^2}\operatorname{tr}(KCLC),
+  \qquad C = I - \tfrac1n\mathbf{1}\mathbf{1}',
+\end{equation}
+with Gaussian kernels $K_{ii'}=\exp(-\|\tilde z_i-\tilde z_{i'}\|^2/2h_Z^2)$ and
+$L_{ii'}=\exp(-(\hat\varepsilon_i-\hat\varepsilon_{i'})^2/2h_\varepsilon^2)$ (median bandwidths),
+and a $p$-value from 199 permutations of $\hat\varepsilon$. Instruments are partialled on $W$ before
+the test, since the raw candidates also carry $W$ and dilute the dependence. The permutation null
+ignores the estimation of $\beta$, so the test is approximate. Two versions enter the Monte Carlo:
+\emph{HSIC test}, where the procedure must also pass \eqref{eq:gan-hsic} at level $\alpha$; and
+\emph{HSIC in training}, where in addition $\gamma\,\widehat{\HSIC}(\tilde Z_\theta,
+\hat\varepsilon_\theta)$, computed on a random subsample of 512 observations per step with
+$\gamma=10$, is added to \eqref{eq:gan-loss}. Both train on one half and test on the other.
+
 \begin{proposition}[What the tests can see]\label{prop:gan}
 Let $Z=G(X,W,\nu)$ for any measurable $G$ with $\E\|Z\|^2<\infty$ and $\nu$ independent of
 $(X,W,u)$, and suppose the conditional confounding is linear,
@@ -246,6 +262,17 @@ compare estimators of the same pseudo-true value. For (c), with $p=1$ the restri
 full system. For (d), $\varepsilon^\ast = u - \E[u\mid X,W]$, so
 $\E[\varepsilon^\ast\mid X,W,\nu]=0$ and $\Cov(D(\tilde Z),\varepsilon^\ast)=0$ for every $D$.
 \end{proof}
+
+\begin{remark}[When the HSIC test has power]\label{rem:hsic}
+Under \eqref{eq:linear-confounding} the residual at the pseudo-true value is
+$\varepsilon^\ast = u - \E[u\mid X,W]$. It is uncorrelated with every function of the instruments,
+but it is independent of them only if the conditional law of $u$ given $(X,W)$ depends on $(X,W)$
+through its mean alone. With jointly Gaussian sources this holds, and the HSIC test is as blind as
+Sargan. With non-Gaussian sources the conditional variance or shape of $u$ given $X$ generally
+moves with $X$, which the HSIC test can detect. Its power is reduced by the noise $\nu$ the generator
+mixes into the candidates, and a generator trained against HSIC can learn to hide the dependence on
+the training half.
+\end{remark}
 
 Condition \eqref{eq:linear-confounding} holds when the sources are jointly Gaussian, and also in the
 canonical model \eqref{eq:canonical} when $H$ and $e_X$ are exchangeable, since then

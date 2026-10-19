@@ -26,6 +26,11 @@ Implementation:
   coefficients) is significant, drop that candidate. Each x_j keeps at least
   one instrument. ``filter="ctest"`` uses the difference-in-Sargan (C)
   statistic, the correct test for a subset of instruments.
+* ``hsic="eval"`` adds an HSIC independence test between the kept instruments
+  and the full-system residual (permutation calibrated) to the pass criterion;
+  ``hsic="train"`` also adds gamma * HSIC(Z, eps_hat) to the generator loss.
+  Both force sample splitting, so that the test is computed on data the
+  generator never saw.
 * ``sargan_eq="partialled"`` replaces the restricted equation by
   y - sum_{k != j} beta_k x_k = beta_j x_j + ..., with beta_k from the full
   system, so that the other endogenous regressors do not enter the error.
@@ -43,6 +48,7 @@ from scipy import stats
 
 from . import diagnostics as dg
 from .estimators import Estimate, tsls_fit
+from .independence import permutation_test
 
 try:
     import torch
@@ -67,7 +73,17 @@ class GanIVConfig:
     sargan_eq: str = "restricted"  # or "partialled"
     use_y: bool = False            # the proposal generates from the regressors only
     sample_split: bool = False
+    hsic: str = "none"             # "none", "eval" or "train"
+    hsic_gamma: float = 10.0
+    hsic_batch: int = 512
+    hsic_perm: int = 199
     seed: int = 0
+
+    def __post_init__(self):
+        if self.hsic not in ("none", "eval", "train"):
+            raise ValueError(f"unknown hsic option {self.hsic!r}")
+        if self.hsic != "none":
+            self.sample_split = True
 
 
 def _require_torch():
@@ -101,6 +117,17 @@ def _tests_torch(Z, xt, yt, ridge=1e-4):
     g = torch.linalg.solve(G, Z.T @ eps)
     S = n * (eps @ (Z @ g)) / (eps * eps).sum()
     return F, S, eps, beta
+
+
+def _hsic_torch(a, b):
+    """Biased HSIC with Gaussian kernels and median bandwidths, O(n^2)."""
+    def gram(v):
+        d2 = torch.cdist(v, v) ** 2
+        med = torch.median(d2.detach()[d2.detach() > 0])
+        return torch.exp(-d2 / med.clamp_min(1e-6))
+    K, L = gram(a), gram(b)
+    Kc = K - K.mean(0, keepdim=True) - K.mean(1, keepdim=True) + K.mean()
+    return (Kc * L).mean()
 
 
 def _system_torch(Z, Xt, yt, ridge=1e-4):
@@ -186,6 +213,9 @@ class GanIV:
             oc.step()
             # generator step: pass the per-variable tests and fool the critic
             g_loss = g_loss + cfg.zeta * _corr2(self.critic(Z).squeeze(1), eps_sys)
+            if cfg.hsic == "train":
+                idx = torch.randperm(len(yt))[:cfg.hsic_batch]
+                g_loss = g_loss + cfg.hsic_gamma * _hsic_torch(Z[idx], eps_sys[idx, None])
             og.zero_grad()
             g_loss.backward()
             og.step()
@@ -305,18 +335,29 @@ def gan_iv(y, X, W, cfg: GanIVConfig | None = None, rng=None) -> Estimate:
     passed = all(t["F"] > 10 and (np.isnan(t["sargan_p"]) or t["sargan_p"] > cfg.alpha)
                  for t in tests)
     sargan_all = dg.gmm_j(yB, XB, WB, Z[:, keep])
+    hsic_p = np.nan
+    if cfg.hsic != "none":
+        resid = tsls_fit(yB, XB, WB, Z[:, keep]).resid
+        # test the excluded variation of the instruments (W partialled out), which is
+        # what instruments x; raw candidates also carry W and dilute the dependence
+        Zr = np.column_stack([_residualise_np(Z[:, c], WB) for c in keep])
+        hsic_p = permutation_test(Zr, resid, "hsic", n_perm=cfg.hsic_perm,
+                                  max_n=1000, rng=rng).pvalue
+        passed = passed and hsic_p > cfg.alpha
     # fitted first stage of x_1, to measure (outside the estimator) its correlation with u
     Xf = np.column_stack([np.ones(len(yB)), Z[:, keep], WB])
     xhat = Xf @ np.linalg.lstsq(Xf, XB[:, 0], rcond=None)[0]
     se = float(np.sqrt(V[0, 0]))
     sp = [t["sargan_p"] for t in tests if np.isfinite(t["sargan_p"])]
     return Estimate(
-        f"GAN-IV ({cfg.filter})", float(b[0]), se, (b[0] - Z975 * se, b[0] + Z975 * se),
+        f"GAN-IV ({cfg.filter}{', HSIC ' + cfg.hsic if cfg.hsic != 'none' else ''})", float(b[0]), se, (b[0] - Z975 * se, b[0] + Z975 * se),
         extra=dict(
             beta_all=b.tolist(), se_all=np.sqrt(np.diag(V)).tolist(), per_variable=tests,
             F=min(t["F"] for t in tests),
             sargan_p=min(sp) if sp else np.nan,
             sargan_system_p=float(sargan_all.pvalue),
+            hsic_p=float(hsic_p),
+            hsic_reject=float(hsic_p < cfg.alpha) if np.isfinite(hsic_p) else np.nan,
             n_kept=len(keep), n_candidates=Z.shape[1], identified=passed,
             eval_idx=B, xhat=_residualise_np(xhat, WB), history=model.history,
         ))

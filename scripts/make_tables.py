@@ -19,6 +19,7 @@ LABELS = {
     "anchored_xfit": "Anchored split (L1, cross-fit)",
     "gan_hausman": "GAN, Hausman filter", "gan_ctest": "GAN, C-test filter",
     "gan_split": "GAN, sample split", "gan_partialled": "GAN, partialled Sargan",
+    "gan_hsic_eval": "GAN + HSIC test", "gan_hsic_train": "GAN + HSIC in training",
 }
 SCEN = {
     "s1_latent_nongaussian": "S1 non-Gaussian factor",
@@ -46,6 +47,12 @@ GAN_COLS = [
     ("Pass", lambda r: fmt(1 - float(r["not_identified"]), 2) if fmt(r.get("mean_sargan_p")) != "--" else "--"),
     ("$\\bar p_S$", lambda r: fmt(r.get("mean_sargan_p"), 2)),
     ("Kept", lambda r: fmt(r.get("mean_n_kept"), 1)),
+    ("$\\rho_u$", lambda r: fmt(r.get("mean_corr_u"), 2)),
+]
+HSIC_COLS = [
+    ("Bias", lambda r: fmt(r["median_bias"])),
+    ("Pass", lambda r: fmt(1 - float(r["not_identified"]), 2) if fmt(r.get("mean_sargan_p")) != "--" else "--"),
+    ("Rej.\\ HSIC", lambda r: fmt(r.get("mean_hsic_reject"), 2)),
     ("$\\rho_u$", lambda r: fmt(r.get("mean_corr_u"), 2)),
 ]
 
@@ -105,6 +112,7 @@ def main():
     ap.add_argument("--nn", required=True)
     ap.add_argument("--gan")
     ap.add_argument("--anchored")
+    ap.add_argument("--hsic")
     ap.add_argument("--out", default="paper/tables")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
@@ -134,6 +142,15 @@ def main():
             "mean of the smallest per-variable Sargan $p$-value; Kept: candidates left after "
             "filtering; $\\rho_u$: correlation of the fitted first stage of $x_1$ with $u$. ",
             "tab:mc-gan", est_g, GAN_COLS))
+    if a.hsic:
+        hs = read(a.hsic)
+        est_h = [e for e in LABELS if any(r["estimator"] == e for r in hs)]
+        (out / "mc_gan_hsic.tex").write_text(table(
+            hs, "Generated instruments with the HSIC test, $\\lambda=1$. All rows train on one half "
+            "and test on the other. Pass: share of replications passing every test (weak instruments, "
+            "Sargan and, for the HSIC rows, the HSIC test at 5\\%); Rej.\\ HSIC: rejection rate of the "
+            "HSIC test between the W-partialled instruments and the 2SLS residual; $\\rho_u$ as in "
+            "Table~\\ref{tab:mc-gan}. ", "tab:mc-gan-hsic", est_h, HSIC_COLS))
     if a.anchored:
         anc = read(a.anchored)
         est_a = [e for e in LABELS if any(r["estimator"] == e for r in anc)]

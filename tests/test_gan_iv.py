@@ -60,3 +60,22 @@ def test_gan_instruments_pass_the_tests_but_reproduce_ols(make_sample):
     assert abs(e.beta - s.beta) > 0.3
     u = s.u[e.extra["eval_idx"]]
     assert np.corrcoef(e.extra["xhat"], u)[0, 1] > 0.3
+
+
+def test_hsic_options_force_sample_split():
+    assert GanIVConfig(hsic="eval").sample_split
+    assert GanIVConfig(hsic="train").sample_split
+    assert not GanIVConfig().sample_split
+    with pytest.raises(ValueError):
+        GanIVConfig(hsic="always")
+
+
+@pytest.mark.parametrize("mode", ["eval", "train"])
+def test_hsic_variant_reports_heldout_test(make_sample, mode):
+    s = make_sample("s1_asymmetric", n=1200, lam=1.0)
+    e = gan_iv(s.y, s.x, s.W, GanIVConfig(epochs=60, hsic=mode, hsic_perm=49))
+    assert 0 < e.extra["hsic_p"] <= 1
+    assert e.extra["hsic_reject"] in (0.0, 1.0)
+    assert len(e.extra["eval_idx"]) == 600
+    if e.extra["hsic_reject"]:
+        assert not e.identified
