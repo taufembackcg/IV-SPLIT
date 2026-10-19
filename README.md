@@ -28,13 +28,20 @@ python scripts/run_montecarlo.py --scenarios s1_latent_nongaussian s3_gaussian -
     --lam 1.0 --reps 200 --estimators ols oracle cumulant --out results/lam1
 python scripts/run_montecarlo.py --scenarios s1_latent_nongaussian s3_gaussian aux_heteroskedastic \
     --n 2000 --lam 0.5 --reps 25 --estimators ols cumulant neural_iv neural_cf --out results/nn
+# anchored split (one process per scenario keeps each run short) and GAN instruments
+python scripts/run_montecarlo.py --scenarios s1_latent_nongaussian --n 2000 5000 --lam 1.0 --reps 40 \
+    --estimators ols oracle cumulant cumulant_aux anchored anchored_aux anchored_xfit --out results/anchored
+python scripts/run_montecarlo.py --scenarios s1_latent_nongaussian s1_asymmetric s2_nonlinear_confounding \
+    s3_gaussian s5_placebo m2_latent_nongaussian m2_gaussian --n 1000 5000 --lam 1.0 --reps 60 \
+    --estimators ols oracle gan_hausman gan_ctest gan_split gan_partialled --jobs 2 --out results/gan
 python scripts/make_tables.py --fast results/fast/summary.csv --lam1 results/lam1/summary.csv \
-    --nn results/nn/summary.csv
+    --nn results/nn/summary.csv --gan results/gan/summary.csv --anchored results/anchored/summary.csv
 ```
 
 ## Main findings so far
 
 1. In the canonical latent-confounder model, fourth-order cumulants identify β only up to the set {β, β+λ}. The two points are observationally equivalent, so picking one needs a labelling assumption: either the sign of the confounding or an auxiliary variable.
 2. The identification-strength statistic D is zero in the population when the sources are Gaussian or when there is no confounding. Small values of D flag failed identification.
-3. In the over-complete model, the exogenous source is generally not a measurable function of the data. An unanchored network split therefore drifts towards OLS. The paper proposes an anchored split as the next step.
+3. In the over-complete model, the exogenous source is generally not a measurable function of the data. An unanchored network split therefore drifts towards OLS. The anchored split, which fixes β at the cumulant estimate and feeds ỹ to the network, carries the anchor over to the held-out half. With cross-fitting it matches the cumulant estimator's precision but does not improve on it.
 4. The overidentification test that uses powers of the instrument has no power when E[H | x̃] is linear. That happens when the sources are Gaussian or when the confounder and the exogenous source are exchangeable.
+5. The GAN-instrument idea (two generated candidates per endogenous regressor, trained to pass per-variable weak-instrument and Sargan tests, then filtered by Hausman) passes its tests in almost every replication but returns the OLS estimate (`src/ivsplit/gan_iv.py`, Section 7 of the paper). Under linear confounding no overidentification, Hausman, C or critic test has power.

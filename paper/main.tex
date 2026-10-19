@@ -715,7 +715,33 @@ and the share of replications in which the method declares that $\beta$ is not i
 
 \subsection{Anchored split}\label{sec:anchored-mc}
 
-\emph{Results pending.}
+Table~\ref{tab:mc-anchored} compares the anchored split of Section~\ref{sec:anchored} (60 epochs,
+$\kappa=10$) with the cumulant layer it is anchored to, at $\lambda=1$ (S5 keeps $\lambda=0$).
+For the anchored split, NI flags a replication when $D$ on the estimation half is below the
+$\chi^2_1$ critical value, when $F<10$, or when the Anderson--Rubin set is unbounded.
+
+\input{tables/mc_anchored.tex}
+
+\paragraph{The network transfers the anchor, as Proposition~\ref{prop:anchor} predicts.} In S1
+with $n=5000$ the single-fold anchored split is median-unbiased ($-0.03$), but its RMSE ($0.16$) is
+larger than that of Cumulant-ICA on the full sample ($0.10$), because the anchor uses only half of the
+data. Cross-fitting restores the full-sample precision (RMSE $0.10$, coverage $0.97$) without
+improving on it. The same holds with a non-linear $g(w)$ (RMSE $0.12$ against $0.13$) and in the
+auxiliary-heteroskedasticity design with labelling (L2) (RMSE $0.08$ against $0.05$ for the plain
+estimator). When the label is correct, adding the anchor's bootstrap variance gives coverage between $0.80$
+and $0.97$ for the single-fold version, so the correction is necessary but not always sufficient at these sample sizes.
+
+\paragraph{Labelling and identification carry over.} Wherever the cumulant layer fails, the anchored
+split fails with it. With (L2) in S1, where $\Var(e_X\mid w_1)$ is constant, it picks the wrong root
+(median bias $0.84$). Under Gaussian sources (S3) every replication is flagged. In the placebo,
+$\det M=0$ because $\lambda=0$, so almost every replication is flagged even though OLS is
+consistent; a Hausman test should accompany $D$, as noted in Section~\ref{sec:diagnostic}.
+
+\paragraph{Assessment.} The anchored split is a valid way to move the identification delivered by
+higher-order cumulants into an IV framework, with held-out inference. In these designs, however,
+it adds no precision over the closed-form estimator. Its potential value lies in settings the
+linear layer handles poorly (richer non-linear nuisance functions, several moment functions,
+auxiliary variables), which remain to be tested.
 
 \subsection{Generated instruments}\label{sec:gan-mc}
 
@@ -797,7 +823,7 @@ critical value, and for the split also $F<10$ or an unbounded Anderson--Rubin se
   \item Run scenarios S1 and S3 first: if the method cannot separate the identifiable case from the
   Gaussian one, nothing else matters. The pilot shows that the cumulant layer and the diagnostic $D$
   pass this test, while the unanchored network does not improve on OLS.
-  \item Implement and evaluate the anchored split of Section~\ref{sec:anchored}.
+  \item Test the anchored split where the linear layer is weak: richer non-linear nuisance functions,\n  several learned moment functions, and auxiliary variables that shift the law of $e_X$.
   \item Replace permutation calibration of the residual-independence tests with a bootstrap that
   re-estimates $\beta$.
   \item Read \citet{hoyer2008}, \citet{silva2017} and \citet{tramontano2025} closely to settle the
