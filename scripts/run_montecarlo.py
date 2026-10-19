@@ -17,14 +17,14 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from ivsplit.dgp import SCENARIOS  # noqa: E402
+from ivsplit.dgp import MULTI_SCENARIOS, SCENARIOS  # noqa: E402
 from ivsplit.montecarlo import ESTIMATORS, FAST_ESTIMATORS, run_grid, write_csv  # noqa: E402
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scenarios", nargs="+", default=["s1_latent_nongaussian", "s3_gaussian"],
-                    choices=sorted(SCENARIOS))
+                    choices=sorted(SCENARIOS) + sorted(MULTI_SCENARIOS))
     ap.add_argument("--all-scenarios", action="store_true")
     ap.add_argument("--n", nargs="+", type=int, default=[1000, 2000])
     ap.add_argument("--lam", nargs="+", type=float, default=[0.5])

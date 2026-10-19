@@ -123,6 +123,8 @@ def simulate(cfg: DGPConfig, rng: np.random.Generator | int | None = None) -> Sa
 SCENARIOS: dict[str, dict] = {
     "s1_latent_nongaussian": dict(dist_H="laplace", dist_X="laplace", dist_Y="laplace"),
     "s1_latent_nonlinear_g": dict(dist_H="laplace", dist_X="laplace", dist_Y="laplace", g="nonlinear"),
+    # non-exchangeable sources: E[H | H + e_X] is non-linear
+    "s1_asymmetric": dict(dist_H="exponential", dist_X="laplace", dist_Y="laplace"),
     "s2_nonlinear_confounding": dict(nonlinear_confounding=True, dist_X="exponential", dist_Y="gaussian", lam=0.3),
     "s3_gaussian": dict(dist_H="gaussian", dist_X="gaussian", dist_Y="gaussian"),
     "s4_correlated_sources": dict(rho=0.3),
@@ -172,3 +174,10 @@ def simulate_multi(n: int = 2000, p: int = 2, lam: float = 1.0, beta=None,
     u = lam * H + draw_source(rng, dist, n)
     y = X @ beta + W @ np.full(n_w, 0.5) + u
     return MultiSample(y=y, X=X, W=W, Z_oracle=E, u=u, H=H, beta=beta)
+
+
+# Named multi-endogenous scenarios (GAN-instrument experiment).
+MULTI_SCENARIOS: dict[str, dict] = {
+    "m2_latent_nongaussian": dict(p=2, dist="laplace"),
+    "m2_gaussian": dict(p=2, dist="gaussian"),
+}

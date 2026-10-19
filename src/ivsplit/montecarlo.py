@@ -16,7 +16,7 @@ from typing import Callable
 import numpy as np
 
 from . import estimators as est
-from .dgp import SCENARIOS, scenario, simulate
+from .dgp import MULTI_SCENARIOS, SCENARIOS, scenario, simulate, simulate_multi
 
 EstimatorFn = Callable[[object, np.random.Generator], est.Estimate]
 
@@ -46,7 +46,7 @@ def _anchored(**kw) -> EstimatorFn:
 def _gan(**kw) -> EstimatorFn:
     def run(s, rng):
         from .gan_iv import GanIVConfig, gan_iv
-        e = gan_iv(s.y, s.x, s.W, GanIVConfig(seed=int(rng.integers(1 << 31)), **kw), rng=rng)
+        e = gan_iv(s.y, _X(s), s.W, GanIVConfig(seed=int(rng.integers(1 << 31)), **kw), rng=rng)
         idx = e.extra.pop("eval_idx")
         xhat = e.extra.pop("xhat")
         e.extra.pop("history", None)
@@ -56,9 +56,18 @@ def _gan(**kw) -> EstimatorFn:
     return run
 
 
+def _X(s):
+    """Endogenous regressor(s): x for single-regressor samples, X for multi."""
+    return s.X if hasattr(s, "X") else s.x
+
+
+def _Z(s):
+    return s.Z_oracle if hasattr(s, "Z_oracle") else s.z_oracle
+
+
 ESTIMATORS: dict[str, EstimatorFn] = {
-    "ols": lambda s, rng: est.ols(s.y, s.x, s.W),
-    "oracle": lambda s, rng: est.oracle_tsls(s.y, s.x, s.W, s.z_oracle),
+    "ols": lambda s, rng: est.ols(s.y, _X(s), s.W),
+    "oracle": lambda s, rng: est.oracle_tsls(s.y, _X(s), s.W, _Z(s)),
     "sp": lambda s, rng: est.sp_projection(s.y, s.x, s.W),
     "lewbel": lambda s, rng: est.lewbel(s.y, s.x, s.W),
     "copula": lambda s, rng: est.copula_cf(s.y, s.x, s.W),
@@ -73,6 +82,7 @@ ESTIMATORS: dict[str, EstimatorFn] = {
     "gan_hausman": _gan(filter="hausman"),
     "gan_ctest": _gan(filter="ctest"),
     "gan_split": _gan(filter="hausman", sample_split=True),
+    "gan_partialled": _gan(filter="hausman", sargan_eq="partialled"),
 }
 
 # Extra per-replication diagnostics carried into the records when an estimator reports them.
@@ -86,19 +96,27 @@ def run_cell(scenario_name: str, n: int, lam: float, reps: int, estimators: list
     """Run one grid cell and return one record per (replication, estimator)."""
     # Parameters fixed by the scenario definition (e.g. lam = 0 in the placebo)
     # take precedence over the grid value.
-    lam = SCENARIOS[scenario_name].get("lam", lam)
-    cfg = scenario(scenario_name, n=n, lam=lam, **overrides)
+    multi = scenario_name in MULTI_SCENARIOS
+    if multi:
+        params = {**MULTI_SCENARIOS[scenario_name], **overrides}
+        draw = lambda rng: simulate_multi(n=n, lam=lam, rng=rng, **params)  # noqa: E731
+        beta_true = 1.0  # all coefficients are 1; records refer to the first one
+    else:
+        lam = SCENARIOS[scenario_name].get("lam", lam)
+        cfg = scenario(scenario_name, n=n, lam=lam, **overrides)
+        draw = lambda rng: simulate(cfg, rng)  # noqa: E731
+        beta_true = cfg.beta
     ss = np.random.SeedSequence([seed, n, int(round(1000 * lam)), zlib.crc32(scenario_name.encode())])
     records = []
     for rep, child in enumerate(ss.spawn(reps)):
         rng = np.random.default_rng(child)
-        sample = simulate(cfg, rng)
+        sample = draw(rng)
         for name in estimators:
             e = ESTIMATORS[name](sample, rng)
             lo, hi = e.ci
             records.append(dict(
                 scenario=scenario_name, n=n, lam=lam, rep=rep, estimator=name,
-                beta_hat=e.beta, se=e.se, lo=lo, hi=hi, beta=cfg.beta,
+                beta_hat=e.beta, se=e.se, lo=lo, hi=hi, beta=beta_true,
                 identified=e.identified,
                 **{f: float(e.extra.get(f, np.nan)) for f in EXTRA_FIELDS},
             ))
